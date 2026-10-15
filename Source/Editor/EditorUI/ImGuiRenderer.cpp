@@ -21,9 +21,13 @@ namespace
 	{
 		ImGuiStyle* style = &ImGui::GetStyle();
 		ImVec4* colors = style->Colors;
+		const ImVec4 Accent(0.65f, 0.30f, 0.45f, 1.00f);
+		const ImVec4 AccentHover(0.75f, 0.40f, 0.55f, 1.00f);
+		const ImVec4 AccentActive(0.55f, 0.20f, 0.35f, 1.00f);
 
 		colors[ImGuiCol_Text] = ImVec4(1.000f, 1.000f, 1.000f, 1.000f);
 		colors[ImGuiCol_TextDisabled] = ImVec4(0.500f, 0.500f, 0.500f, 1.000f);
+		colors[ImGuiCol_TextLink] = AccentHover;
 		colors[ImGuiCol_WindowBg] = ImVec4(0.180f, 0.180f, 0.180f, 1.000f);
 		colors[ImGuiCol_ChildBg] = ImVec4(0.280f, 0.280f, 0.280f, 0.000f);
 		colors[ImGuiCol_PopupBg] = ImVec4(0.313f, 0.313f, 0.313f, 1.000f);
@@ -32,58 +36,77 @@ namespace
 		colors[ImGuiCol_FrameBg] = ImVec4(0.160f, 0.160f, 0.160f, 1.000f);
 		colors[ImGuiCol_FrameBgHovered] = ImVec4(0.200f, 0.200f, 0.200f, 1.000f);
 		colors[ImGuiCol_FrameBgActive] = ImVec4(0.280f, 0.280f, 0.280f, 1.000f);
+		colors[ImGuiCol_InputTextCursor] = colors[ImGuiCol_Text];
 		colors[ImGuiCol_TitleBg] = ImVec4(0.148f, 0.148f, 0.148f, 1.000f);
 		colors[ImGuiCol_TitleBgActive] = ImVec4(0.148f, 0.148f, 0.148f, 1.000f);
 		colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.148f, 0.148f, 0.148f, 1.000f);
 		colors[ImGuiCol_MenuBarBg] = ImVec4(0.195f, 0.195f, 0.195f, 1.000f);
 		colors[ImGuiCol_ScrollbarBg] = ImVec4(0.160f, 0.160f, 0.160f, 1.000f);
 		colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.277f, 0.277f, 0.277f, 1.000f);
-		colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.300f, 0.300f, 0.300f, 1.000f);
-		colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(1.000f, 0.391f, 0.000f, 1.000f);
+		colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.360f, 0.360f, 0.360f, 1.000f);
+		colors[ImGuiCol_ScrollbarGrabActive] = AccentActive;
+		colors[ImGuiCol_CheckboxSelectedBg] = ImVec4(Accent.x, Accent.y, Accent.z, 0.80f);
 		colors[ImGuiCol_CheckMark] = ImVec4(1.000f, 1.000f, 1.000f, 1.000f);
 		colors[ImGuiCol_SliderGrab] = ImVec4(0.391f, 0.391f, 0.391f, 1.000f);
-		colors[ImGuiCol_SliderGrabActive] = ImVec4(1.000f, 0.391f, 0.000f, 1.000f);
-		colors[ImGuiCol_Button] = ImVec4(0.650f, 0.300f, 0.450f, 0.800f);        
-		colors[ImGuiCol_ButtonHovered] = ImVec4(0.750f, 0.400f, 0.550f, 1.000f); 
-		colors[ImGuiCol_ButtonActive] = ImVec4(0.550f, 0.200f, 0.350f, 1.000f);  
+		colors[ImGuiCol_SliderGrabActive] = AccentHover;
+		colors[ImGuiCol_Button] = ImVec4(Accent.x, Accent.y, Accent.z, 0.80f);
+		colors[ImGuiCol_ButtonHovered] = AccentHover;
+		colors[ImGuiCol_ButtonActive] = AccentActive;
 		colors[ImGuiCol_Header] = ImVec4(0.313f, 0.313f, 0.313f, 1.000f);
-		colors[ImGuiCol_HeaderHovered] = ImVec4(0.469f, 0.469f, 0.469f, 1.000f);
+		colors[ImGuiCol_HeaderHovered] = ImVec4(0.400f, 0.400f, 0.400f, 1.000f);
 		colors[ImGuiCol_HeaderActive] = ImVec4(0.469f, 0.469f, 0.469f, 1.000f);
 		colors[ImGuiCol_Separator] = colors[ImGuiCol_Border];
 		colors[ImGuiCol_SeparatorHovered] = ImVec4(0.391f, 0.391f, 0.391f, 1.000f);
-		colors[ImGuiCol_SeparatorActive] = ImVec4(1.000f, 0.391f, 0.000f, 1.000f);
+		colors[ImGuiCol_SeparatorActive] = Accent;
 		colors[ImGuiCol_ResizeGrip] = ImVec4(1.000f, 1.000f, 1.000f, 0.250f);
 		colors[ImGuiCol_ResizeGripHovered] = ImVec4(1.000f, 1.000f, 1.000f, 0.670f);
-		colors[ImGuiCol_ResizeGripActive] = ImVec4(1.000f, 0.391f, 0.000f, 1.000f);
+		colors[ImGuiCol_ResizeGripActive] = Accent;
 		colors[ImGuiCol_Tab] = ImVec4(0.098f, 0.098f, 0.098f, 1.000f);
 		colors[ImGuiCol_TabHovered] = ImVec4(0.352f, 0.352f, 0.352f, 1.000f);
-		colors[ImGuiCol_TabActive] = ImVec4(0.195f, 0.195f, 0.195f, 1.000f);
-		colors[ImGuiCol_TabUnfocused] = ImVec4(0.098f, 0.098f, 0.098f, 1.000f);
-		colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.195f, 0.195f, 0.195f, 1.000f);
-		colors[ImGuiCol_DockingPreview] = ImVec4(1.000f, 0.391f, 0.000f, 0.781f);
+		colors[ImGuiCol_TabSelected] = ImVec4(0.250f, 0.250f, 0.250f, 1.000f);
+		colors[ImGuiCol_TabDimmed] = ImVec4(0.098f, 0.098f, 0.098f, 1.000f);
+		colors[ImGuiCol_TabDimmedSelected] = ImVec4(0.195f, 0.195f, 0.195f, 1.000f);
+		colors[ImGuiCol_TabSelectedOverline] = Accent;
+		colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.40f, 0.30f, 0.35f, 1.00f);
+		colors[ImGuiCol_DockingPreview] = ImVec4(Accent.x, Accent.y, Accent.z, 0.65f);
 		colors[ImGuiCol_DockingEmptyBg] = ImVec4(0.180f, 0.180f, 0.180f, 1.000f);
 		colors[ImGuiCol_PlotLines] = ImVec4(0.469f, 0.469f, 0.469f, 1.000f);
-		colors[ImGuiCol_PlotLinesHovered] = ImVec4(1.000f, 0.391f, 0.000f, 1.000f);
+		colors[ImGuiCol_PlotLinesHovered] = AccentHover;
 		colors[ImGuiCol_PlotHistogram] = ImVec4(0.586f, 0.586f, 0.586f, 1.000f);
-		colors[ImGuiCol_PlotHistogramHovered] = ImVec4(1.000f, 0.391f, 0.000f, 1.000f);
+		colors[ImGuiCol_PlotHistogramHovered] = AccentHover;
+		colors[ImGuiCol_TableHeaderBg] = ImVec4(0.240f, 0.240f, 0.240f, 1.000f);
+		colors[ImGuiCol_TableBorderStrong] = colors[ImGuiCol_Border];
+		colors[ImGuiCol_TableBorderLight] = ImVec4(0.220f, 0.220f, 0.220f, 1.000f);
+		colors[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+		colors[ImGuiCol_TableRowBgAlt] = ImVec4(1.0f, 1.0f, 1.0f, 0.03f);
 		colors[ImGuiCol_TextSelectedBg] = ImVec4(1.000f, 1.000f, 1.000f, 0.156f);
-		colors[ImGuiCol_DragDropTarget] = ImVec4(1.000f, 0.391f, 0.000f, 1.000f);
-		colors[ImGuiCol_NavHighlight] = ImVec4(1.000f, 0.391f, 0.000f, 1.000f);
-		colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.000f, 0.391f, 0.000f, 1.000f);
+		colors[ImGuiCol_TreeLines] = colors[ImGuiCol_Border];
+		colors[ImGuiCol_DragDropTarget] = AccentHover;
+		colors[ImGuiCol_DragDropTargetBg] = ImVec4(Accent.x, Accent.y, Accent.z, 0.18f);
+		colors[ImGuiCol_UnsavedMarker] = Accent;
+		colors[ImGuiCol_NavCursor] = Accent;
+		colors[ImGuiCol_NavWindowingHighlight] = Accent;
 		colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.000f, 0.000f, 0.000f, 0.586f);
 		colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.000f, 0.000f, 0.000f, 0.586f);
 
+		// 패딩과 위젯 크기는 기준 배율로 정의하고 Init에서 모니터 DPI를 적용한다.
+		style->WindowPadding = ImVec2(10.0f, 10.0f);
+		style->FramePadding = ImVec2(8.0f, 4.0f);
+		style->ItemSpacing = ImVec2(8.0f, 6.0f);
+		style->ItemInnerSpacing = ImVec2(6.0f, 4.0f);
+		style->CellPadding = ImVec2(6.0f, 4.0f);
+		style->IndentSpacing = 18.0f;
+		style->WindowMinSize = ImVec2(160.0f, 100.0f);
 		style->ChildRounding = 4.0f;
 		style->FrameBorderSize = 1.0f;
-		style->FrameRounding = 2.0f;
-		style->GrabMinSize = 7.0f;
-		style->PopupRounding = 2.0f;
-		style->ScrollbarRounding = 12.0f;
-		style->ScrollbarSize = 13.0f;
+		style->FrameRounding = 3.0f;
+		style->GrabMinSize = 10.0f;
+		style->PopupRounding = 4.0f;
+		style->ScrollbarRounding = 7.0f;
+		style->ScrollbarSize = 14.0f;
 		style->TabBorderSize = 1.0f;
-		style->TabRounding = 0.0f;
+		style->TabRounding = 3.0f;
 		style->WindowRounding = 4.0f;
-		style->FontScaleDpi = 1.7f;
 	}
 }
 
@@ -108,15 +131,12 @@ bool FImGuiRenderer::Init(HWND WindowHandle, ID3D11Device* Device, ID3D11DeviceC
 
 	ApplyDefaultStyle();
 
-	//// 프로세스가 Per-Monitor DPI Aware라 창이 실제 픽셀 크기로 잡힌다. 모니터 배율(예: 150%)만큼 UI를 키운다.
-	//// 1.92+ 동적 폰트 아틀라스라 FontScaleDpi로 키워도 글자가 해당 크기로 다시 래스터화되어 흐려지지 않는다.
-	//const float DpiScale = ImGui_ImplWin32_GetDpiScaleForHwnd(WindowHandle);
-	//ImGuiStyle& Style = ImGui::GetStyle();
-	//Style.ScaleAllSizes(DpiScale);     // 패딩·간격·스크롤바 등 크기 (ApplyDefaultStyle 이후에 적용)
-	//Style.FontScaleDpi = DpiScale;     // 글자 크기
-	//// 다른 배율의 모니터로 창을 옮기면 글자 배율을 자동으로 갱신한다.
-	//io.ConfigDpiScaleFonts = true;
-	//io.ConfigDpiScaleViewports = true;
+	const float DpiScale = ImGui_ImplWin32_GetDpiScaleForHwnd(WindowHandle);
+	ImGuiStyle& Style = ImGui::GetStyle();
+	Style.ScaleAllSizes(DpiScale);
+	Style.FontScaleDpi = DpiScale;
+	io.ConfigDpiScaleFonts = true;
+	io.ConfigDpiScaleViewports = true;
 
 	return true;
 }

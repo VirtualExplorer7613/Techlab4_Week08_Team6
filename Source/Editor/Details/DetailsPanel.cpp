@@ -43,7 +43,7 @@ namespace
 	{
 		bool isValueChanged = false;
 
-		float lineHeight = GImGui->Font->LegacySize + GImGui->Style.FramePadding.y * 2.0f;
+		float lineHeight = ImGui::GetFrameHeight();
 		ImVec4 color(_color.X, _color.Y, _color.Z, _color.W);
 		ImVec2 buttonSize = { lineHeight + 2.0f , lineHeight };
 
@@ -676,8 +676,17 @@ namespace
 		void* ValuePtr = reinterpret_cast<char*>(Object) + Property.Offset;
 		const FString Label = "##" + Property.Name;
 
-		ImGui::Text(Property.Name.c_str());
-		ImGui::SameLine(120.0f);
+		// 좁은 패널과 긴 이름은 라벨 아래에 입력을 배치한다.
+		const float RowStart = ImGui::GetCursorPosX();
+		const float AvailableWidth = ImGui::GetContentRegionAvail().x;
+		const float LabelWidth = AvailableWidth * 0.45f;
+		const bool bInline = Property.Type != EPropertyType::Transform && AvailableWidth >= 260.0f &&
+			ImGui::CalcTextSize(Property.Name.c_str()).x < LabelWidth;
+
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextWrapped("%s", Property.Name.c_str());
+		if (bInline)
+			ImGui::SameLine(RowStart + LabelWidth);
 		ImGui::SetNextItemWidth(-1.0f);
 
 		bool bChanged = false;
@@ -950,6 +959,34 @@ void FDetailsPanel::Tick(float DeltaTime)
 {
 }
 
+void FDetailsPanel::SetTarget(AActor* InTargetActor)
+{
+	if (TargetActor != InTargetActor)
+	{
+		PendingDeleteComponent = nullptr;
+		EditingNameComponent = nullptr;
+		ComponentNameEditBuffer[0] = '\0';
+		bFocusNameEdit = false;
+		bIsEditingName = false;
+		PendingDroppedComponent = nullptr;
+		PendingDragComponent = nullptr;
+		ComponentsToExpand.Reset();
+	}
+	TargetActor = InTargetActor;
+	TargetComponent = InTargetActor ? InTargetActor->GetRootComponent() : nullptr;
+}
+
+void FDetailsPanel::ExpandComponentPath(UActorComponent* Component)
+{
+	ComponentsToExpand.Reset();
+	if (!Component || Component->GetOwner() != TargetActor)
+		return;
+
+	// 접힌 조상까지 다음 트리 순회에서 한 번만 펼친다.
+	for (USceneComponent* Parent = Cast<USceneComponent>(Component); Parent; Parent = Parent->GetAttachParent())
+		ComponentsToExpand.Add(Parent);
+}
+
 
 void FDetailsPanel::OnRender()
 {
@@ -986,7 +1023,9 @@ void FDetailsPanel::OnRender()
 		UActorComponent* SelectCandidateComponent = TargetComponent;
 
 		DrawActorHeader(TargetActor, TargetComponent);
-		DrawCompoenetList(TargetActor, TargetComponent);				
+		if (TargetComponent != SelectCandidateComponent)
+			ExpandComponentPath(TargetComponent);
+		DrawCompoenetList(TargetActor, TargetComponent);
 		ImGui::Separator();
 
 		// 액터 -> 컴포넌트 순으로, 클래스별 프로퍼티 표시
@@ -1027,11 +1066,17 @@ void FDetailsPanel::OnRender()
 
 void FDetailsPanel::SelectComponent(UActorComponent* Component)
 {
+	if (Component && Component->GetOwner() != TargetActor)
+		return;
+
 	if (!Component)
 	{
 		TargetComponent = nullptr;
 		EditingNameComponent = nullptr;
 		bFocusNameEdit = false;
+		PendingDroppedComponent = nullptr;
+		PendingDragComponent = nullptr;
+		ComponentsToExpand.Reset();
 
 		if (Callback)
 			Callback(nullptr);
@@ -1039,6 +1084,8 @@ void FDetailsPanel::SelectComponent(UActorComponent* Component)
 		return;
 	}
 
+	if (TargetComponent != Component)
+		ExpandComponentPath(Component);
 	TargetComponent = Component;
 
 	if (Callback)
@@ -1058,10 +1105,22 @@ void FDetailsPanel::DrawCompoenetList(AActor* SelectedActor, UActorComponent*& O
 
 	USceneComponent* Root = SelectedActor->GetRootComponent();
 
-	if (Root && ImGui::CollapsingHeader("Components", ImGuiTreeNodeFlags_DefaultOpen))
+	if (!ComponentsToExpand.IsEmpty())
+		ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+	if (ImGui::CollapsingHeader("Components", ImGuiTreeNodeFlags_DefaultOpen))
 	{
-		DrawSceneComponentNode(Root, Root, OutSelectedComponent);
+		if (Root)
+			DrawSceneComponentNode(Root, Root, OutSelectedComponent);
+
+		// 루트에서 분리된 SceneComponent도 같은 트리에서 편집할 수 있어야 한다.
+		for (UActorComponent* ActorComp : SelectedActor->GetComponents())
+		{
+			USceneComponent* SceneComponent = Cast<USceneComponent>(ActorComp);
+			if (SceneComponent && SceneComponent != Root && !SceneComponent->GetAttachParent())
+				DrawSceneComponentNode(SceneComponent, Root, OutSelectedComponent);
+		}
 	}
+	ComponentsToExpand.Reset();
 
 	ImGui::Separator();
 
@@ -1131,7 +1190,7 @@ void FDetailsPanel::DrawSceneComponentNode(USceneComponent* Component, USceneCom
 	const bool bIsLeaf = Children.IsEmpty();
 	bIsEditingName = (EditingNameComponent == Component);
 
-	ImGuiTreeNodeFlags Flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
+	ImGuiTreeNodeFlags Flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_DefaultOpen;
 	if (Component == OutSelectedComponent)
 	{
 		Flags |= ImGuiTreeNodeFlags_Selected;
@@ -1146,6 +1205,14 @@ void FDetailsPanel::DrawSceneComponentNode(USceneComponent* Component, USceneCom
 		Label += " (Root)";
 
 	ImGui::PushID(Component);
+	for (USceneComponent* ComponentToExpand : ComponentsToExpand)
+	{
+		if (ComponentToExpand == Component)
+		{
+			ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+			break;
+		}
+	}
 	const ImVec2 RowStart = ImGui::GetCursorScreenPos();
 	const float RowWidth = ImGui::GetContentRegionAvail().x;
 	const bool bOpen = ImGui::TreeNodeEx("ComponentNode", Flags, "%s", bIsEditingName ? "" : Label.c_str());
@@ -1156,6 +1223,7 @@ void FDetailsPanel::DrawSceneComponentNode(USceneComponent* Component, USceneCom
 	if (Component != Root && ImGui::BeginDragDropSource())
 	{
 		ImGui::SetDragDropPayload(EditorDragDrop::Component, &Component, sizeof(USceneComponent*));
+		ImGui::Text("%s", Component->GetName().c_str());
 		ImGui::EndDragDropSource();
 	}
 	// target: 모든 행이 가능, payload를 받아 현재 Component를 부모로 사용
@@ -1163,9 +1231,15 @@ void FDetailsPanel::DrawSceneComponentNode(USceneComponent* Component, USceneCom
 	{
 		if (const ImGuiPayload* Payload = ImGui::AcceptDragDropPayload(EditorDragDrop::Component))
 		{
-			USceneComponent* DroppedComponent = *static_cast<USceneComponent**>(Payload->Data);
-			PendingDroppedComponent = DroppedComponent;
-			PendingDragComponent = DragComponent;
+			if (Payload->DataSize == sizeof(USceneComponent*))
+			{
+				USceneComponent* DroppedComponent = *static_cast<USceneComponent**>(Payload->Data);
+				if (DroppedComponent && DroppedComponent->GetOwner() == TargetActor)
+				{
+					PendingDroppedComponent = DroppedComponent;
+					PendingDragComponent = DragComponent;
+				}
+			}
 		}
 		ImGui::EndDragDropTarget();
 	}
@@ -1241,11 +1315,18 @@ void FDetailsPanel::DrawSceneComponentNode(USceneComponent* Component, USceneCom
 
 void FDetailsPanel::TryReparent(USceneComponent* DroppedComponent, USceneComponent* DragComponent)
 {
-	if (DroppedComponent != nullptr 
+	if (TargetActor != nullptr
+		&& DroppedComponent != nullptr
+		&& DragComponent != nullptr
+		&& DroppedComponent->GetOwner() == TargetActor
+		&& DragComponent->GetOwner() == TargetActor
+		&& DroppedComponent != TargetActor->GetRootComponent()
 		&& DroppedComponent->GetAttachParent() != DragComponent
 		&& DroppedComponent != DragComponent)
 	{
 		DroppedComponent->SetupAttachment(DragComponent, EAttachmentRule::KeepWorld);
+		if (DroppedComponent->GetAttachParent() == DragComponent)
+			ExpandComponentPath(DroppedComponent);
 	}
 }
 

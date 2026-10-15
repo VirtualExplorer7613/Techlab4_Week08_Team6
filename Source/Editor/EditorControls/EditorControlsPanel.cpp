@@ -9,6 +9,7 @@
 
 #include "Input/InputSystem.h"
 
+#include <algorithm>
 #include <cmath>
 
 // 패널 초기화 성공을 반환한다.
@@ -74,13 +75,16 @@ void FEditorControlsPanel::OnRender()
 	const float Available = ImGui::GetContentRegionAvail().x;
 	const float Spacing = ImGui::GetStyle().ItemSpacing.x;
 
-	const float ComboWidth =
-		Available - SpawnButtonWidth - CountWidth - Spacing * 2.0f;
+	const bool bInline = Available >= SpawnButtonWidth + CountWidth + Spacing * 2.0f + 120.0f;
+	const float ComboWidth = bInline
+		? Available - SpawnButtonWidth - CountWidth - Spacing * 2.0f
+		: Available;
 
-	ImGui::SetNextItemWidth(ComboWidth);
+	ImGui::SetNextItemWidth(std::max(1.0f, ComboWidth));
 	ImGui::Combo("##ActorType", &SelectedIndex, Items, IM_ARRAYSIZE(Items));
 
-	ImGui::SameLine();
+	if (bInline)
+		ImGui::SameLine();
 
 	// PIE 중에는 보이지 않는 에디터 월드에 스폰되므로 막는다.
 	const bool bPlaying = IsPlayingQuery && IsPlayingQuery();
@@ -91,7 +95,8 @@ void FEditorControlsPanel::OnRender()
 	}
 	ImGui::EndDisabled();
 
-	ImGui::SameLine();
+	if (bInline)
+		ImGui::SameLine();
 	ImGui::TextDisabled("%s", CountText);
 
 	//////////////////////////////////////////////////////

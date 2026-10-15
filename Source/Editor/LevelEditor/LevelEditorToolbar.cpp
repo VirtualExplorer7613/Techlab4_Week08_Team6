@@ -3,6 +3,8 @@
 
 #include "Asset/AssetManager.h"
 
+#include <algorithm>
+
 namespace
 {
 	void BeginToolbarGroup()
@@ -40,8 +42,11 @@ void FLevelEditorToolbar::Draw()
 {
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 8, 6 });
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 4, 4 });
+	const ImGuiStyle& Style = ImGui::GetStyle();
+	const float ToolbarHeight = std::max(Height,
+		std::max(20.0f, ImGui::GetFontSize()) + Style.FramePadding.y * 2.0f + Style.WindowPadding.y * 2.0f);
 	const bool bOpen = ImGui::BeginViewportSideBar("##LevelEditorToolbar", ImGui::GetMainViewport(),
-		ImGuiDir_Up, Height, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings);
+		ImGuiDir_Up, ToolbarHeight, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings);
 
 	if (bOpen)
 	{

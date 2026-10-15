@@ -25,11 +25,7 @@ public:
 
 	const char* GetPanelName() const override { return "Details"; }
 
-	void SetTarget(AActor* InTargetActor) 
-	{ 
-		TargetActor = InTargetActor;
-		TargetComponent = InTargetActor ? InTargetActor->GetRootComponent() : nullptr;
-	}
+	void SetTarget(AActor* InTargetActor);
 	void SetTargetComponent(UActorComponent* InTargetComponent) { TargetComponent = InTargetComponent; }
 
 	void SetSelectionCallback(DetailsSelectionCallback InCallback) { Callback = InCallback; }
@@ -42,6 +38,7 @@ public:
 private:
 	void DrawSceneComponentNode(USceneComponent* Component, USceneComponent* Root, UActorComponent*& OutSelectedComponent);
 	void TryReparent(USceneComponent* DroppedComponent, USceneComponent* DragComponent);
+	void ExpandComponentPath(UActorComponent* Component);
 
 	UWorld* World = nullptr;
 	ImFont* CustomFont = nullptr;
@@ -59,5 +56,6 @@ private:
 
 	USceneComponent* PendingDroppedComponent = nullptr;
 	USceneComponent* PendingDragComponent = nullptr;
+	TArray<USceneComponent*> ComponentsToExpand;
 };
 
