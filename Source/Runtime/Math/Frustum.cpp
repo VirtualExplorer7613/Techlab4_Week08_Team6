@@ -52,10 +52,32 @@ bool IsAABBInFrustum(const FAABB& Bounds, const FFrustumPlanes& Frustum)
     return true;
 }
 
-
 FAABB MakeWorldBounds(const FBox& Value)
 {
     const FVector Center = (Value.Min + Value.Max) * 0.5f;
     const FVector Extent = (Value.Max - Value.Min) * 0.5f;
     return { Center, Extent };
+}
+
+std::array<FVector, 8> GetFrustumCornersWorld(const FMatrix& ViewProjection)
+{
+    std::array<FVector, 8> Corners{};
+    const FMatrix InvVP = ViewProjection.Inverse();
+    int32 Index = 0;
+
+    for (float Z : { 0.0f, 1.0f })
+    {
+        for (float Y : { -1.0f, 1.0f })
+        {
+            for (float X : { -1.0f, 1.0f })
+            {
+                FVector4 Point(X, Y, Z, 1.0f);
+                Point = Point * InvVP;
+                Point /= Point.W;
+                Corners[Index++] = FVector(Point.X, Point.Y, Point.Z);
+            }
+        }
+    }
+
+    return Corners;
 }

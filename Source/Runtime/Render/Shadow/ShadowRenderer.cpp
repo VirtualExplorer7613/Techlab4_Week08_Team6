@@ -1,0 +1,104 @@
+#include "EnginePCH.h"
+#include "ShadowRenderer.h"
+#include "Math/Frustum.h"
+
+FMatrix FShadowRenderer::BuildDirectionalLightView(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection) const
+{
+    FVector Center(0.0f, 0.0f, 0.0f);
+
+    for (const FVector& Corner : FrustumCornersWorld)
+        Center += Corner;
+
+    Center /= 8.0f;
+
+    const FVector Forward = LightDirection.Normalized();
+    const FVector WorldUp = std::abs(Forward.Dot(UpVector)) > 0.99f ? RightVector : UpVector;
+    const FVector Right = WorldUp.Cross(Forward).Normalized();
+    const FVector Up = Forward.Cross(Right);
+
+    float MaxDistance = 0.0f;
+    for (const FVector& Corner : FrustumCornersWorld)
+        MaxDistance = std::max(MaxDistance, (Corner - Center).Size());
+
+    const FVector LightPosition = Center - Forward * MaxDistance;
+
+    const FMatrix LightWorld(
+        FVector4(Forward.X, Forward.Y, Forward.Z, 0.0f),
+        FVector4(Right.X, Right.Y, Right.Z, 0.0f),
+        FVector4(Up.X, Up.Y, Up.Z, 0.0f),
+        FVector4(LightPosition.X, LightPosition.Y, LightPosition.Z, 1.0f)
+    );
+
+    return LightWorld.Inverse();
+}
+
+FBox FShadowRenderer::CalculateLightSpaceBounds(const std::array<FVector, 8>& FrustumCornersWorld, const FMatrix& LightView) const
+{
+    const FVector FirstPoint = LightView.TransformPosition(FrustumCornersWorld[0]);
+    FBox Box{ FirstPoint, FirstPoint };
+
+    for (size_t i = 1; i < FrustumCornersWorld.size(); ++i)
+    {
+        const FVector Point = LightView.TransformPosition(FrustumCornersWorld[i]);
+        Box.Expand(FBox{ Point, Point });
+    }
+
+    return Box;
+}
+
+FMatrix FShadowRenderer::BuildDirectionalLightProjection(const FBox& LightSpaceBounds) const
+{
+    const float Left = LightSpaceBounds.Min.Y;
+    const float Right = LightSpaceBounds.Max.Y;
+    const float Bottom = LightSpaceBounds.Min.Z;
+    const float Top = LightSpaceBounds.Max.Z;
+    const float Near = LightSpaceBounds.Min.X;
+    const float Far = LightSpaceBounds.Max.X;
+
+    const float HorizontalScale = 2.0f / (Right - Left);
+    const float HorizontalOffset = -(Right + Left) / (Right - Left);
+
+    const float VerticalScale = 2.0f / (Top - Bottom);
+    const float VerticalOffset = -(Top + Bottom) / (Top - Bottom);
+
+    const float DepthScale = 1.0f / (Far - Near);
+    const float DepthOffset = -Near / (Far - Near);
+
+    return FMatrix(
+        0.0f, 0.0f, DepthScale, 0.0f,
+        HorizontalScale, 0.0f, 0.0f, 0.0f,
+        0.0f, VerticalScale, 0.0f, 0.0f,
+        HorizontalOffset, VerticalOffset, DepthOffset, 1.0f
+    );
+}
+
+FMatrix FShadowRenderer::BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection) const
+{
+    const std::array<FVector, 8> Corners = GetFrustumCornersWorld(CameraVP);
+    const std::array<FVector, 8> ShadowCorners = LimitFrustumToShadowDistance(Corners, CameraNear, CameraFar, ShadowDistance);
+
+    const FMatrix LightView = BuildDirectionalLightView(ShadowCorners, LightDirection);
+    const FBox LightSpaceBounds = CalculateLightSpaceBounds(ShadowCorners, LightView);
+    const FMatrix LightProjection = BuildDirectionalLightProjection(LightSpaceBounds);
+
+    return LightView * LightProjection;
+}
+
+std::array<FVector, 8> FShadowRenderer::LimitFrustumToShadowDistance(const std::array<FVector, 8>& Corners, float CameraNear, float CameraFar, float ShadowDistance) const
+{
+    std::array<FVector, 8> Result = Corners;
+
+    const float ClampedDistance = std::clamp(ShadowDistance, CameraNear, CameraFar);
+    const float Ratio = (ClampedDistance - CameraNear) / (CameraFar - CameraNear);
+
+    for (size_t i = 0; i < 4; ++i)
+    {
+        const FVector NearPoint = Corners[i];
+        const FVector FarPoint = Corners[i + 4];
+
+        const FVector NewFarPoint = NearPoint + (FarPoint - NearPoint) * Ratio;
+        Result[i + 4] = NewFarPoint;
+    }
+
+    return Result;
+}
