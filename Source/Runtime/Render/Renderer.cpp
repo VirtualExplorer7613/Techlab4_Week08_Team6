@@ -100,6 +100,19 @@ bool FRenderer::Init()
 	PerObjectCB = RenderCommand::CreateConstantBuffer(sizeof(FPerObjectConstants));
 	ViewCB = RenderCommand::CreateConstantBuffer(sizeof(FViewConstants));
 	LightCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGlobalConstants));
+
+    D3D11_TEXTURE2D_DESC DirectionalShadowMapDesc{};
+    DirectionalShadowMapDesc.Width = 2048;
+    DirectionalShadowMapDesc.Height = 2048;
+    DirectionalShadowMapDesc.MipLevels = 1;
+    DirectionalShadowMapDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+    DirectionalShadowMapDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+    DirectionalShadowMapDesc.ArraySize = 1;
+    DirectionalShadowMapDesc.SampleDesc.Count = 1;
+    DirectionalShadowMapDesc.SampleDesc.Quality = 0;
+
+	DirectionalShadowMap = RenderCommand::CreateTexture2D(DirectionalShadowMapDesc);
+
 	if (!CreateDynamicStructuredBuffer(sizeof(FPointLight), NUM_POINT_LIGHT, PointLightBuffer, PointLightSRV) || !CreateDynamicStructuredBuffer(sizeof(FSpotLight), NUM_SPOT_LIGHT, SpotLightBuffer, SpotLightSRV))
 	{
 		HTR_LOG(Error, "[Renderer] Failed to create dynamic structured buffers for lights.");
@@ -198,6 +211,9 @@ void FRenderer::BindLightResources()
 	ID3D11DeviceContext* Context = RenderCommand::GetContext();
 	Context->VSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 	Context->PSSetShaderResources(LightSRVSlot, 2, LightSRVs);
+
+    RenderCommand::BindShaderResource(10, DirectionalShadowMap.get(), EShaderBindFlagBits::Pixel);
+    RenderCommand::BindSamplerState(1, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel);
 }
 
 void FRenderer::RenderOpaque(const FMatrix& ViewProjection, const EViewMode ViewMode, bool bDepthPrepassed)
@@ -243,15 +259,20 @@ void FRenderer::DrawStaticGroups(const EViewMode ViewMode)
 			UpdateMaterialParams(MaterialOnly);
 		}
 
-		for (const FStaticDrawItem& Item : Group->Items)
-		{
+		for (const FStaticDrawItem &Item : Group->Items)
+        {
+            if (bShadowMapPass && Item.Proxy && !Item.Proxy->GetCastShadows())
+            {
+                continue;
+            }                
+
 			if (bUsePerObjectSlots && Item.Slot != InvalidObjectSlot)
 			{
-				RenderCommand::BindConstantBufferRange(2, PerObjectSlotCB.get(), Item.Slot * PerObjectSlotConstants, PerObjectSlotConstants, EShaderBindFlagBits::Vertex);
+				RenderCommand::BindConstantBufferRange(2, PerObjectSlotCB.get(), Item.Slot * PerObjectSlotConstants, PerObjectSlotConstants, EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 			}
 			else
 			{
-				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
+				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld());
 			}
 			RenderCommand::DrawIndexed(Item.IndexCount, Item.StartIndex);
@@ -322,6 +343,12 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 		const uint32 PacketIndex = SortEntries[k].PacketIndex;
 		const FRenderPacket& RenderPacket = RenderPackets[PacketIndex];
 		//if (RenderPacket.Mesh == nullptr || RenderPacket.Material == nullptr) continue;
+
+        if (bShadowMapPass && RenderPacket.Proxy && !RenderPacket.Proxy->GetCastShadows())
+        {
+            continue; 
+        }
+
 		if (RenderPacket.Mesh != LastMesh || RenderPacket.LODIndex != LastLODIndex) {
 			RenderCommand::BindMesh(RenderPacket.Mesh, RenderPacket.LODIndex);
 		}
@@ -334,11 +361,11 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 
 		if (bUsePerObjectSlots && RenderPacket.Slot != InvalidObjectSlot)
 		{
-			RenderCommand::BindConstantBufferRange(2, PerObjectSlotCB.get(), RenderPacket.Slot * PerObjectSlotConstants, PerObjectSlotConstants, EShaderBindFlagBits::Vertex);
+			RenderCommand::BindConstantBufferRange(2, PerObjectSlotCB.get(), RenderPacket.Slot * PerObjectSlotConstants, PerObjectSlotConstants, EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 		}
 		else
 		{
-			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
+			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 			UpdatePerObjectConstants(RenderPacket, ViewProjection);
 		}
 
@@ -444,7 +471,7 @@ FOcclusionMeasureResult FRenderer::MeasureOpaqueOcclusion(const FMatrix& ViewPro
 
 		if (bUsePerObjectSlots && Draw.Slot != InvalidObjectSlot)
 			RenderCommand::BindConstantBufferRange(2, PerObjectSlotCB.get(),
-				Draw.Slot * PerObjectSlotConstants, PerObjectSlotConstants, EShaderBindFlagBits::Vertex);
+				Draw.Slot * PerObjectSlotConstants, PerObjectSlotConstants, EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 		else
 		{
 			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
@@ -676,4 +703,55 @@ void FRenderer::SetLight(const FLightConstants& InLightData)
 	RenderCommand::UpdateBufferData(LightCB.get(), &Globals, sizeof(FLightGlobalConstants));
 	UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight) * LightData.PointLightCount);
 	UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
+}
+
+void FRenderer::RenderDirectionalShadowMap(const FMatrix &CameraViewProjection, const FVector &CameraLocation , const EViewMode ViewMode)
+{
+    if (LightData.DirectionalLight.ShadowParameters.W <= 0.0f)
+    {
+        return;
+    }        
+
+    // SRV Unbinding
+    RenderCommand::UnbindShaderResource(10, EShaderBindFlagBits::Pixel);
+
+    const FMatrix &LightVP = LightData.DirectionalLight.ViewProjection;
+
+    // Set up the rendering info for the shadow pass
+    FRenderingInfo ShadowPassInfo;
+    ShadowPassInfo.ViewportSetting = {0, 0, 2048, 2048, 0.0f, 1.0f};
+    ShadowPassInfo.ColorRenderTargets.Reset();
+    ShadowPassInfo.DepthStencil.Texture = DirectionalShadowMap.get();
+    ShadowPassInfo.DepthStencil.LoadOp = ERenderTargetLoadOp::Clear;
+    ShadowPassInfo.DepthStencil.ClearValue.DepthClearValue = 1.0f;
+
+    // Change the rasterizer, depth-stencil, and blend states for shadow rendering
+    ERasterizerState RasterizerState = ERasterizerState::SolidBack;
+    EDepthStencilState DepthStencilState = EDepthStencilState::Default;
+    EBlendState BlendState = EBlendState::NoColorWrite;
+
+    RenderCommand::BeginRenderPass(ShadowPassInfo);
+
+    RenderCommand::SetRasterizerState(RasterizerState);
+    RenderCommand::SetDepthStencilState(DepthStencilState);
+    RenderCommand::SetBlendState(BlendState);
+
+    FViewConstants ViewConstants;
+    ViewConstants.VP = LightVP;
+    RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
+
+    bDepthOnly = true;
+    bShadowMapPass = true;
+
+    DrawStaticGroups(ViewMode);
+    DrawPackets(0, FirstTranslucentIndex, LightVP, ViewMode);
+
+    bDepthOnly = false;
+    bShadowMapPass = false;
+
+    RenderCommand::EndRenderPass(ShadowPassInfo);
+
+    ViewConstants.VP = CameraViewProjection;
+    ViewConstants.CameraPosition = CameraLocation;
+    RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
 }

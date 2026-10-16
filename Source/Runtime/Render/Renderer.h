@@ -23,6 +23,8 @@ struct FPerObjectConstants
 {
 	FMatrix World;
 	FMatrix WorldInvTranspose;
+	uint32 bReceiveShadow = 1;
+	uint32 Padding[3] = {};
 };
 
 struct FSortEntry
@@ -76,6 +78,8 @@ struct alignas(16) FDirectionalLight
 {
 	FVector4 ColorIntensity; // rgb : 색상, w: 강도
 	FVector4 Direction;		 // xyz : 광선 방향(World)
+	FMatrix ViewProjection;	 // ViewProjection 행렬. 그림자 맵을 만들 때 사용
+	FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
 };
 
 
@@ -100,7 +104,7 @@ struct alignas(16) FLightGlobalConstants
 	uint32 SpotLightCount = 0;
 	uint32 Padding[2] = {};
 };
-static_assert(sizeof(FLightGlobalConstants) == 64, "FLightGlobalConstants must match UberLit LightConstants");
+static_assert(sizeof(FLightGlobalConstants) == 144, "FLightGlobalConstants must match UberLit LightConstants");
 
 class FRenderer
 {
@@ -143,6 +147,8 @@ public:
 
 	void SetLight(const FLightConstants& LightData);
 
+    void RenderDirectionalShadowMap(const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
 	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World)
 	{
@@ -159,6 +165,15 @@ public:
 		Constants.WorldInvTranspose = WorldInverse.GetTransposed();
 		std::memcpy(SlotBase + size_t(SlotIndex) * ObjectSlotBytes, &Constants, sizeof(Constants));
 	}
+
+    inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World, const FMatrix& WorldInverse, bool bReceiveShadow)
+    {
+        FPerObjectConstants Constants;
+        Constants.World = World;
+        Constants.WorldInvTranspose = WorldInverse.GetTransposed();
+        Constants.bReceiveShadow = bReceiveShadow ? 1 : 0;
+        std::memcpy(SlotBase + size_t(SlotIndex) * ObjectSlotBytes, &Constants, sizeof(Constants));
+    }
 
 	ID3D11ShaderResourceView* GetPointLightSRV() const { return PointLightSRV.Get(); }
 	ID3D11ShaderResourceView* GetSpotLightSRV() const { return SpotLightSRV.Get(); }
@@ -216,9 +231,14 @@ private:
 	ComPtr<ID3D11Buffer> SpotLightBuffer;
 	ComPtr<ID3D11ShaderResourceView> SpotLightSRV;
 
+    TUniquePtr<FTexture2D> DirectionalShadowMap;
+
 	//DepthPrepass 시 잠깐 켜짐, 머테리얼 바인딩을 건너뜀
 	bool bDepthOnly = false;
 
 	//DepthPrepass가 이전에 실행되었다면 true, Opaque pass에서만 사용됨
 	bool bDepthPrepassed = false;
+
+    // Shadow map pass에서만 사용
+    bool bShadowMapPass = false;
 };

@@ -20,6 +20,8 @@ cbuffer Worldconstants : register(b2)
 {
     matrix World;
     matrix WorldInvTranspose;
+    uint bReceiveShadow;
+    uint Paddings[3];
 };
 
 cbuffer MaterialParams : register(b1)
@@ -59,6 +61,8 @@ struct FDirectionalLightInfo
 {
     float4 ColorIntensity;
     float4 Direction;
+    matrix LightVP;
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
 };
 
 // 개수가 하나뿐인 라이트와 로컬 라이트 개수만 cbuffer에 둔다 (C++ FLightGlobalConstants와 같은 레이아웃)
@@ -75,6 +79,8 @@ cbuffer LightConstants : register(b3)
 // 머티리얼 텍스처(t0~)와 겹치지 않도록 뒤쪽 슬롯을 쓴다 (C++ LightSRVSlot과 같은 값)
 StructuredBuffer<FPointLightInfo> PointLights : register(t8);
 StructuredBuffer<FSpotLightInfo> SpotLights : register(t9);
+
+Texture2D<float> DirectionalShadowMap : register(t10);
 
 cbuffer TileBasedCullingConstants : register(b4)
 {
@@ -94,6 +100,11 @@ cbuffer TileBasedCullingConstants : register(b4)
 
 StructuredBuffer<uint2> TileHeader : register(t1);
 StructuredBuffer<uint> TileLightIndices : register(t2);
+
+Texture2D g_txColor : register(t0);
+SamplerState g_Sample : register(s0);
+SamplerState g_SampleShadow : register(s1);
+Texture2D g_txNormal : register(t3); // CPU에서 Textures[1]에 저장한 normal texture\
 
 // ACES Filmic Tone Mapping
 float3 ACESFilmicToneMapping(float3 color)
@@ -196,13 +207,54 @@ float3 CalculateAmbientLight(FAmbientLightInfo info)
     return info.ColorIntensity.xyz * info.ColorIntensity.w;
 }
 
-FLightResult CalculateDirectionalLight(FDirectionalLightInfo info, float3 normal, float3 viewDir)
+float CalculateDirectionalShadow(float3 worldPos, float3 normal)
+{
+    float4 shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
+    shadowPos.xyz /= shadowPos.w; // W divde
+    shadowPos.x = shadowPos.x * 0.5f + 0.5f;
+    shadowPos.y = -shadowPos.y * 0.5f + 0.5f;
+    
+    // 뷰포트 밖이면 그림자 없음
+    if (shadowPos.x < 0.0f || shadowPos.x > 1.0f || shadowPos.y < 0.0f || shadowPos.y > 1.0f)
+    {
+        return 1.0f;
+    }
+
+    
+    float2 texelSize = float2(DirectionalLight.ShadowParameters.z, DirectionalLight.ShadowParameters.z);
+
+    float NdotL = saturate(dot(normal, -DirectionalLight.Direction.xyz));
+    
+    float bias = DirectionalLight.ShadowParameters.x + DirectionalLight.ShadowParameters.y * (1.0f - NdotL);
+    
+    float visibility = 0.0f;
+    for (int x = -1; x <= 1; ++x)
+    {
+        for (int y = -1; y <= 1; ++y)
+        {
+            float2 offset = float2(x, y) * texelSize;
+            float depth = DirectionalShadowMap.Sample(g_SampleShadow, shadowPos.xy + offset);
+            visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
+        }
+    }
+    visibility /= 9.0f;
+    return visibility;
+}
+
+FLightResult CalculateDirectionalLight(FDirectionalLightInfo info, float3 normal, float3 viewDir, float3 worldPos)
 {
     // Direction은 빛이 나아가는 방향이므로 뒤집어야 표면→라이트 방향이 된다.
     float3 lightDir = normalize(-info.Direction.xyz);
     float3 radiance = info.ColorIntensity.xyz * info.ColorIntensity.w;
 
-    return BlinnPhong(normal, lightDir, viewDir, radiance);
+    FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
+
+    float Shadow = CalculateDirectionalShadow(worldPos, normal);
+
+    Result.Diffuse *= Shadow;
+    Result.Specular *= Shadow;
+    
+    return Result;
 }
 
 FLightResult CalculateLightingTiled(float2 PixelPos, float3 worldPos, float3 normal, float3 viewDir)
@@ -231,7 +283,7 @@ FLightResult CalculateLightingTiled(float2 PixelPos, float3 worldPos, float3 nor
         Total.Diffuse += Light.Diffuse;
         Total.Specular += Light.Specular;
     }
-    FLightResult Directional = CalculateDirectionalLight(DirectionalLight, normal, viewDir);
+    FLightResult Directional = CalculateDirectionalLight(DirectionalLight, normal, viewDir, worldPos);
     Total.Diffuse += Directional.Diffuse;
     Total.Specular += Directional.Specular;
     return Total;
@@ -261,13 +313,12 @@ FLightResult CalculateLighting(float3 worldPos, float3 normal, float3 viewDir)
     }
 
     //Directional Light
-    FLightResult Directional = CalculateDirectionalLight(DirectionalLight, normal, viewDir);
+    FLightResult Directional = CalculateDirectionalLight(DirectionalLight, normal, viewDir, worldPos);
     Total.Diffuse += Directional.Diffuse;
     Total.Specular += Directional.Specular;
 
     return Total;
 }
-
 
 struct VS_INPUT
 {
@@ -292,10 +343,6 @@ struct PS_INPUT
     float3 tangentWorld : TEXCOORD4;
     nointerpolation float tangentSign : TEXCOORD5;
 };
-
-Texture2D g_txColor : register(t0);
-SamplerState g_Sample : register(s0);
-Texture2D g_txNormal : register(t3); // CPU에서 Textures[1]에 저장한 normal texture
 
 PS_INPUT mainVS(VS_INPUT input)
 {
@@ -412,5 +459,6 @@ float4 mainPS(PS_INPUT input) : SV_TARGET
 #endif
     finalRGB = ACESFilmicToneMapping(finalRGB);
     finalRGB = pow(finalRGB, 1.0f / 2.2f);
+    
     return float4(finalRGB, alpha);
 }

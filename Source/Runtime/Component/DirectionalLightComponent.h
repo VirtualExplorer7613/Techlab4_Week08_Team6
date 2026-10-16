@@ -14,4 +14,5 @@ public:
 	virtual void InitializeComponent() override;
 
 	void DrawDebug(FLineBatcher* LineBatcher) const;
+
 };

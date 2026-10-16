@@ -947,9 +947,11 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	if (Settings.bDrawPrimitives)
 		Renderer->RenderQueueSorting(RenderQueue, ViewProjection, ViewCameraLocation);
 
+    Renderer->RenderDirectionalShadowMap(ViewProjection, ViewCameraLocation, ViewMode);
+
 	if (bPrepass)
 	{
-		RenderDepthPrepass(ViewIndex, ViewRenderingInfo, ViewProjection);
+		RenderDepthPrepass(ViewIndex, ViewRenderingInfo, ViewProjection);        
 	}
 
 	bool bTileCulled = false;

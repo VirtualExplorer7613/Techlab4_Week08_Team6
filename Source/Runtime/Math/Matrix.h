@@ -53,6 +53,11 @@ public:
 
 	static FMatrix MakeTranslation(const FVector& T);
 
+	static FMatrix MakeLookAt(const FVector& Eye, const FVector& Target, const FVector& Up);
+
+	static FMatrix MakePerspective(float FOV, float AspectRatio, float NearPlane, float FarPlane);
+	static FMatrix MakeOrthographic(float Width, float Height, float NearPlane, float FarPlane);
+
 	//void To3x4MatrixTranspose(float* Out) const;
 	// FMatrix TransposeAdjoint();
 

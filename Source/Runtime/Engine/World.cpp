@@ -310,7 +310,7 @@ void UWorld::GatherRenderPackets(FRenderQueue& RenderQueue, const FLODViewContex
 					uint32 Slot = InvalidObjectSlot;
 					if (SlotDest)
 					{
-						Renderer->WriteObjectSlot(SlotDest, VisibleIndex, Proxy->GetLocalToWorld(), Proxy->GetWorldToLocal());
+						Renderer->WriteObjectSlot(SlotDest, VisibleIndex, Proxy->GetLocalToWorld(), Proxy->GetWorldToLocal(), Proxy->GetReceiveShadows());
 						Slot = VisibleIndex;
 					}
 
@@ -392,7 +392,7 @@ void UWorld::GatherRenderPackets(FRenderQueue& RenderQueue, const FLODViewContex
 					if (!SlotDest || NextExtraSlot >= MaxSlots) break;
 					FRenderPacket& Packet = RenderQueue[p];
 					const FMatrix& Model = Packet.Proxy ? Packet.Proxy->GetLocalToWorld() : Packet.Model ? *Packet.Model : FMatrix::Identity;
-					Renderer->WriteObjectSlot(SlotDest, NextExtraSlot, Model);
+					Renderer->WriteObjectSlot(SlotDest, NextExtraSlot, Model, Model.Inverse(), Packet.Proxy->GetReceiveShadows());
 					Packet.Slot = NextExtraSlot++;
 				}
 			}

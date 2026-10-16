@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "[F5] 빌드 후 디버그 실행 (Build & Debug)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/Build/Bin/Debug-windows-x86_64/HitoriEditor.exe",
+            "args": [],
+            "stopOnEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "preLaunchTask": "Build Debug (VS18 MSBuild)"
+        },
+        {
+            "name": "[즉시 실행] 빌드 없이 디버그 실행 (Debug without Build)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/Build/Bin/Debug-windows-x86_64/HitoriEditor.exe",
+            "args": [],
+            "stopOnEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false
+        }
+    ]
+}

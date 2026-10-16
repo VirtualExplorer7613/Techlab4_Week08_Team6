@@ -43,4 +43,14 @@ struct FBox
 		Max.Y = std::max(Max.Y, Other.Max.Y);
 		Max.Z = std::max(Max.Z, Other.Max.Z);
 	}
+
+    FVector GetCenter() const
+    {
+        return FVector((Min.X + Max.X) * 0.5f, (Min.Y + Max.Y) * 0.5f, (Min.Z + Max.Z) * 0.5f);
+    }
+
+    FVector GetExtent() const
+    {
+        return FVector((Max.X - Min.X) * 0.5f, (Max.Y - Min.Y) * 0.5f, (Max.Z - Min.Z) * 0.5f);
+    }
 };

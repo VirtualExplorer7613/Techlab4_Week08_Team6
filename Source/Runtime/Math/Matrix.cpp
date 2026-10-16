@@ -109,6 +109,55 @@ FMatrix FMatrix::MakeTranslation(const FVector& T)
 	return Mat;
 }
 
+FMatrix FMatrix::MakeLookAt(const FVector& Eye, const FVector& Target, const FVector& Up)
+{
+	const FVector F = (Target - Eye).Normalized();
+    const FVector R = FVector::Cross(Up, F).Normalized();
+    const FVector U = FVector::Cross(F, R);
+
+	const FMatrix Rotation(
+        F.X, R.X, U.X, 0.0f,
+        F.Y, R.Y, U.Y, 0.0f,
+        F.Z, R.Z, U.Z, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f);
+
+    return FMatrix::MakeTranslation(Eye * -1.0f) * Rotation;
+}
+
+FMatrix FMatrix::MakePerspective(float FOV, float AspectRatio, float NearPlane, float FarPlane)
+{
+	const float HalfFOV = FOV * 0.5f;
+
+	const float YScale = 1.0f / tan(HalfFOV);
+	const float XScale = YScale / AspectRatio;
+
+	const float ZScale = FarPlane / (FarPlane - NearPlane);
+	const float ZOffset = -NearPlane * FarPlane / (FarPlane - NearPlane);
+
+	return FMatrix(
+		0.0f, 0.0f, ZScale, 1.0f,
+		XScale, 0.0f, 0.0f, 0.0f,
+		0.0f, YScale, 0.0f, 0.0f,
+		0.0f, 0.0f, ZOffset, 0.0f
+	);
+}
+
+FMatrix FMatrix::MakeOrthographic(float Width, float Height, float NearPlane, float FarPlane)
+{
+	const float XScale = 2.0f / Width;
+	const float YScale = 2.0f / Height;
+
+	const float ZScale = 1.0f / (FarPlane - NearPlane);
+	const float ZOffset = -NearPlane / (FarPlane - NearPlane);
+
+	return FMatrix(
+		0.0f, 0.0f, ZScale, 0.0f,
+		XScale, 0.0f, 0.0f, 0.0f,
+		0.0f, YScale, 0.0f, 0.0f,
+		0.0f, 0.0f, ZOffset, 1.0f
+	);
+}
+
 FVector4 FMatrix::TransformFVector4(const FVector4& V) const
 {
 	FMatrixRegister MReg = FMatrixRegister::Load(*this);

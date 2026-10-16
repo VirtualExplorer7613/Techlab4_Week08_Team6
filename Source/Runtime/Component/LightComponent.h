@@ -11,6 +11,12 @@ class ULightComponentBase : public USceneComponent
 		PROPERTY(Intensity)
 		PROPERTY_TYPE(LightColor, Color)
 		PROPERTY(bVisible)
+		PROPERTY(bCastShadows)
+		PROPERTY(ShadowDepthBias)
+		PROPERTY(ShadowSlopeBias)
+		PROPERTY(ShadowMapWidth)
+		PROPERTY(FarPlane)
+		PROPERTY(NearPlane)
 	REFLECT_END()
 
 public:
@@ -24,10 +30,36 @@ public:
 	const FVector4& GetLightColor() const { return LightColor; }
 	void SetLightColor(const FVector4& InLightColor) { LightColor = InLightColor; }
 
+	bool GetCastShadows() const { return bCastShadows; }
+	void SetCastShadows(bool bInCastShadows) { bCastShadows = bInCastShadows; }
+
+	float GetShadowDepthBias() const { return ShadowDepthBias; }
+	void SetShadowDepthBias(float InShadowDepthBias) { ShadowDepthBias = InShadowDepthBias; }
+
+	float GetShadowSlopeBias() const { return ShadowSlopeBias; }
+	void SetShadowSlopeBias(float InShadowSlopeBias) { ShadowSlopeBias = InShadowSlopeBias; }
+
+	float GetShadowMapWidth() const { return ShadowMapWidth; }
+	void SetShadowMapWidth(float InShadowMapWidth) { ShadowMapWidth = InShadowMapWidth; }
+
+	float GetFarPlane() const { return FarPlane; }
+	void SetFarPlane(float InFarPlane) { FarPlane = InFarPlane; }
+
+	float GetNearPlane() const { return NearPlane; }
+	void SetNearPlane(float InNearPlane) { NearPlane = InNearPlane; }
+
 protected:
 	float Intensity = 1.8f;
 	FVector4 LightColor = FVector4(1.f, 1.f, 1.f, 1.0f);
 	bool bVisible = true;
+
+private:
+	bool bCastShadows = true;
+	float ShadowDepthBias = 0.005f;
+	float ShadowSlopeBias = 0.01f;
+	float ShadowMapWidth = 2048.0f;
+	float FarPlane = 10000.0f;
+	float NearPlane = 10.0f;
 };
 
 
