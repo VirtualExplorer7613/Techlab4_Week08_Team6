@@ -3,6 +3,8 @@
 #include "SceneComponent.h"
 #include "Math/Vector4.h"
 
+class FTexture2D;
+
 class ULightComponentBase : public USceneComponent
 {
 
@@ -13,8 +15,7 @@ class ULightComponentBase : public USceneComponent
 		PROPERTY(bVisible)
 		PROPERTY(bCastShadows)
 		PROPERTY(ShadowDepthBias)
-		PROPERTY(ShadowSlopeBias)
-		PROPERTY(ShadowMapWidth)
+		PROPERTY(ShadowSlopeBias)		
 		PROPERTY(FarPlane)
 		PROPERTY(NearPlane)
 	REFLECT_END()
@@ -48,6 +49,15 @@ public:
 	float GetNearPlane() const { return NearPlane; }
 	void SetNearPlane(float InNearPlane) { NearPlane = InNearPlane; }
 
+    FTexture2D *GetShadowMapTexture() const
+    {
+        return ShadowMapTexture;
+    }
+    void SetShadowMapTexture(FTexture2D *InShadowMapTexture)
+    {
+        ShadowMapTexture = InShadowMapTexture;
+    }
+
 protected:
 	float Intensity = 1.8f;
 	FVector4 LightColor = FVector4(1.f, 1.f, 1.f, 1.0f);
@@ -55,11 +65,13 @@ protected:
 
 private:
 	bool bCastShadows = true;
-	float ShadowDepthBias = 0.005f;
-	float ShadowSlopeBias = 0.01f;
+	float ShadowDepthBias = 0.0f;
+	float ShadowSlopeBias = 0.0f;
 	float ShadowMapWidth = 2048.0f;
-	float FarPlane = 10000.0f;
+	float FarPlane = 250.0f;
 	float NearPlane = 10.0f;
+
+    FTexture2D *ShadowMapTexture = nullptr;
 };
 
 

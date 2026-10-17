@@ -20,7 +20,7 @@ cbuffer Worldconstants : register(b2)
 {
     matrix World;
     matrix WorldInvTranspose;
-    uint bReceiveShadow;
+    uint bReceiveShadow;    
     uint Paddings[3];
 };
 
@@ -220,6 +220,10 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal)
         return 1.0f;
     }
 
+    if(DirectionalLight.ShadowParameters.w == 0.0f || bReceiveShadow == 0)
+    {
+        return 1.0f;
+    }
     
     float2 texelSize = float2(DirectionalLight.ShadowParameters.z, DirectionalLight.ShadowParameters.z);
 

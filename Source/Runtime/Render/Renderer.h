@@ -23,8 +23,8 @@ struct FPerObjectConstants
 {
 	FMatrix World;
 	FMatrix WorldInvTranspose;
-	uint32 bReceiveShadow = 1;
-	uint32 Padding[3] = {};
+	uint32 bReceiveShadow = 1;    
+	uint32 Paddings[3] = {};
 };
 
 struct FSortEntry
@@ -158,6 +158,15 @@ public:
 		std::memcpy(SlotBase + size_t(SlotIndex) * ObjectSlotBytes, &Constants, sizeof(Constants));
 	}
 
+    inline void WriteObjectSlot(uint8 *SlotBase, uint32 SlotIndex, const FMatrix &World, const bool bReceiveShadow)
+    {
+        FPerObjectConstants Constants;
+        Constants.World = World;
+        Constants.WorldInvTranspose = World.Inverse().GetTransposed();
+        Constants.bReceiveShadow = bReceiveShadow ? 1 : 0;
+        std::memcpy(SlotBase + size_t(SlotIndex) * ObjectSlotBytes, &Constants, sizeof(Constants));
+    }
+
 	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World, const FMatrix& WorldInverse)
 	{
 		FPerObjectConstants Constants;
@@ -171,7 +180,7 @@ public:
         FPerObjectConstants Constants;
         Constants.World = World;
         Constants.WorldInvTranspose = WorldInverse.GetTransposed();
-        Constants.bReceiveShadow = bReceiveShadow ? 1 : 0;
+        Constants.bReceiveShadow = bReceiveShadow ? 1 : 0;        
         std::memcpy(SlotBase + size_t(SlotIndex) * ObjectSlotBytes, &Constants, sizeof(Constants));
     }
 
@@ -180,7 +189,15 @@ public:
 
 	uint32 GetPointLightCount() const { return LightData.PointLightCount; }
 	uint32 GetSpotLightCount() const { return LightData.SpotLightCount; }
-	
+
+    ID3D11ShaderResourceView *GetDirectionalShadowMapSRV() const
+    {
+        return DirectionalShadowMap ? DirectionalShadowMap->GetSRV() : nullptr;
+    }
+    FTexture2D *GetDirectionalShadowMap() const
+    {
+        return DirectionalShadowMap.get();
+    }
 
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
@@ -211,12 +228,13 @@ private:
 	void DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProjection, const EViewMode ViewMode);
 	void DrawStaticGroups(const EViewMode ViewMode);
 	void UpdatePerObjectConstants(const FMatrix& World);
+    void UpdatePerObjectConstants(const FMatrix &World, const bool bReceiveShadow);
 
 	// 이번 프레임 스태틱 메시 묶음 (정렬 키 순). 비어 있지 않은 것만 담는다.
 	std::vector<const FStaticDrawGroup*> StaticGroups;
 	void BindMaterial(UMaterial* material, const EViewMode ViewMode);
 	void UpdateMaterialParams(const FRenderPacket& RenderPacket);
-	void UpdatePerObjectConstants(const FRenderPacket& RenderPacket, const FMatrix& ViewProjection);
+	void UpdatePerObjectConstants(const FRenderPacket& RenderPacket, const FMatrix& ViewProjection, const bool bReceiveShadow);
 	void EnsurePerObjectSlotCapacity(uint32 SlotCount);
 	void UploadPerObjectConstants();
 

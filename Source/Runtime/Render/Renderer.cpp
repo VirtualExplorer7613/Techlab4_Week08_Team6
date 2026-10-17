@@ -180,7 +180,7 @@ void FRenderer::UploadPerObjectConstants()
 	{
 		FRenderPacket& P = RenderPackets[Index];
 		const FMatrix& Model = GetPacketWorld(P);
-		WriteObjectSlot(Dest, Index, Model);
+		WriteObjectSlot(Dest, Index, Model, P.Proxy->GetReceiveShadows());
 		P.Slot = Index;
 	}
 
@@ -272,8 +272,8 @@ void FRenderer::DrawStaticGroups(const EViewMode ViewMode)
 			}
 			else
 			{
-				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
-				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld());
+				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);                
+				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld(), Item.Proxy ? Item.Proxy->GetReceiveShadows() : false);
 			}
 			RenderCommand::DrawIndexed(Item.IndexCount, Item.StartIndex);
 		}
@@ -366,7 +366,7 @@ void FRenderer::DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProject
 		else
 		{
 			RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
-			UpdatePerObjectConstants(RenderPacket, ViewProjection);
+			UpdatePerObjectConstants(RenderPacket, ViewProjection, RenderPacket.Proxy ? RenderPacket.Proxy->GetReceiveShadows() : false);
 		}
 
 		RenderCommand::DrawIndexed(
@@ -673,12 +673,16 @@ void FRenderer::UpdateMaterialParams(const FRenderPacket& RenderPacket)
 }
 
 // b0 MVP 채우고 꽂기
-void FRenderer::UpdatePerObjectConstants(const FRenderPacket& RenderPacket, const FMatrix& ViewProjection)
+void FRenderer::UpdatePerObjectConstants(const FRenderPacket& RenderPacket, const FMatrix& ViewProjection, const bool bReceiveShadow)
 {
 	// rp.Transform 과 Camera VP 행렬 곱
 	// 행렬곱의 결과 (MVP Matrix) Constant Buffer 업데이트 필요
+    FPerObjectConstants Constants;
 
-	UpdatePerObjectConstants(GetPacketWorld(RenderPacket));
+    Constants.World = GetPacketWorld(RenderPacket);
+    Constants.WorldInvTranspose = Constants.World.Inverse().GetTransposed();
+    Constants.bReceiveShadow = bReceiveShadow ? 1 : 0;
+    RenderCommand::UpdateBufferData(PerObjectCB.get(), &Constants);	
 }
 
 void FRenderer::UpdatePerObjectConstants(const FMatrix& World)
@@ -686,9 +690,20 @@ void FRenderer::UpdatePerObjectConstants(const FMatrix& World)
 	FPerObjectConstants Constants;
 
 	Constants.World = World;
-	Constants.WorldInvTranspose = World.Inverse().GetTransposed();
+	Constants.WorldInvTranspose = World.Inverse().GetTransposed();	
 
 	RenderCommand::UpdateBufferData(PerObjectCB.get(), &Constants);
+}
+
+void FRenderer::UpdatePerObjectConstants(const FMatrix &World, const bool bReceiveShadow)
+{
+    FPerObjectConstants Constants;
+
+    Constants.World = World;
+    Constants.WorldInvTranspose = World.Inverse().GetTransposed();
+    Constants.bReceiveShadow = bReceiveShadow ? 1 : 0;
+
+    RenderCommand::UpdateBufferData(PerObjectCB.get(), &Constants);
 }
 
 void FRenderer::SetLight(const FLightConstants& InLightData)

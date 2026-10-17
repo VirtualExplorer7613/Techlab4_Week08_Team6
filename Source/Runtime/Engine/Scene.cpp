@@ -234,6 +234,7 @@ void FScene::UpdateLightComponents(FRenderer *Renderer) {
 
     else if (UDirectionalLightComponent *DirectionalLightComponent =
                  Cast<UDirectionalLightComponent>(LightComponent)) {
+        DirectionalLightComponent->SetShadowMapTexture(Renderer->GetDirectionalShadowMap());
       UpdateDirectionalLight(Constants, DirectionalLightComponent);
     }
   }
@@ -372,6 +373,11 @@ void FScene::UpdateDirectionalLight(
 
   const FVector EyePos = CenterPos - Direction * BackDistance;
 
+  const float NearPlane = std::max(1.0f, BackDistance - ShadowRadius - ShadowRadius * 1.5f);
+  const float FarPlane = BackDistance + ShadowRadius * 1.5f;
+  LightComponent->SetNearPlane(NearPlane);
+  LightComponent->SetFarPlane(FarPlane);
+
   const FMatrix ViewMatrix = FMatrix::MakeLookAt(EyePos, CenterPos, UpVector);
   const FMatrix OrthoMatrix = FMatrix::MakeOrthographic(2.0f * ShadowRadius, 2.0f * ShadowRadius, LightComponent->GetNearPlane(), LightComponent->GetFarPlane());
 
@@ -382,7 +388,7 @@ void FScene::UpdateDirectionalLight(
 	  std::max<float>(LightComponent->GetShadowSlopeBias(), 0.001f),
 	  1.f / static_cast<float>(LightComponent->GetShadowMapWidth()),
 	  LightComponent->GetCastShadows() ? 1.f : 0.f);
-   
+
   // TODO : 우선순위 도입하기
   LightConstants.DirectionalLight = DirectionalData;
 }
