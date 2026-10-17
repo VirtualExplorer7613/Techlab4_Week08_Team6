@@ -7,6 +7,7 @@
 #include "Render/Renderer.h"
 #include "Render/RenderDevice.h"
 #include "Render/Swapchain.h"
+#include "Render/Shadow/ShadowRenderer.h"
 #include "Editor/EditorUI/ImGuiRenderer.h"
 #include "Editor/Rendering/GridRenderer.h"
 #include "Editor/Gizmo/GizmoRenderer.h"
@@ -146,6 +147,7 @@ private:
 	TUniquePtr<FSkyboxRenderer> SkyboxRenderer;
 	TUniquePtr<FFXAARenderer> FXAARenderer;
 	TUniquePtr<FDepthViewRenderer> DepthViewRenderer;
+	TUniquePtr<FShadowRenderer> ShadowRenderer;
 	TUniquePtr<FBillboardRenderer> BillboardRenderer;
 
 	UFont* SystemFont;

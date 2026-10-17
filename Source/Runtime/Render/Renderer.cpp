@@ -8,11 +8,13 @@
 #include "Core/Stats/LightweightStats.h"
 
 #include "Engine/PrimitiveSceneProxy.h"
+#include "Engine/Scene.h"
 
 #include "RenderCommand.h"
 #include "RenderResourceManager.h"
 
 #include "Camera/CameraComponent.h"
+#include "Component/PrimitiveComponent.h"
 
 #include <algorithm>
 #include <chrono>
@@ -118,6 +120,58 @@ void FRenderer::DepthPrepass(const FMatrix& ViewProjection, const EViewMode View
 	bDepthOnly = false;
 }
 
+void FRenderer::RenderShadowDepth(const FScene& Scene, const FMatrix& LightVP)
+{
+	FViewConstants ViewConstants{};
+	ViewConstants.VP = LightVP;
+
+	RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
+	RenderCommand::BindConstantBuffer(0, ViewCB.get(), EShaderBindFlagBits::Vertex);
+	RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
+
+	// Shadow Pass에서는 색상이 아니라 깊이만 기록한다.
+	bDepthOnly = true;
+	RenderCommand::SetRasterizerState(ERasterizerState::ShadowDepth);
+	RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	for (const FPrimitiveSceneProxy* Proxy : Scene.Proxies)
+	{
+		if (!Proxy || !Proxy->IsVisible())
+			continue;
+
+		const UPrimitiveComponent* Component = Proxy->GetComponent();
+		if (!Component || !Component->CastsShadow())
+			continue;
+
+		UStaticMesh* Mesh = Proxy->GetMesh();
+		if (!Mesh || !Proxy->GetRenderState())
+			continue;
+
+		// 우선 첫 번째 LOD를 사용한다.
+		RenderCommand::BindMesh(Mesh, 0);
+		UpdatePerObjectConstants(Proxy->GetLocalToWorld());
+
+		const FCachedMeshLOD& LOD = Proxy->GetLOD(0);
+
+		for (uint32 i = 0; i < LOD.NumSections; ++i)
+		{
+			const FCachedMeshSection& Section = Proxy->GetSection(LOD.FirstSection + i);
+			if (!Section.Material || !Section.Material->Shader)
+				continue;
+
+			BindMaterial(Section.Material, EViewMode::Unlit);
+
+			const FVector Center = Proxy->GetBounds().Center;
+			const FVector4 Clip = LightVP.TransformFVector4(FVector4(Center.X, Center.Y, Center.Z, 1.0f));
+			const FVector NDC(Clip.X / Clip.W, Clip.Y / Clip.W, Clip.Z / Clip.W);
+
+			RenderCommand::DrawIndexed(Section.IndexCount, Section.StartIndex);
+		}
+	}
+
+	bDepthOnly = false;
+}
+
 // 필요한 칸 수가 용량을 넘을 때만 두 배씩 키워 재할당을 드물게 한다.
 void FRenderer::EnsurePerObjectSlotCapacity(uint32 SlotCount)
 {
@@ -165,10 +219,11 @@ void FRenderer::UploadPerObjectConstants()
 	// 매핑된 메모리는 write-combined라 순차 쓰기만 하고 읽지 않는다.
 	for (uint32 Index = 0; Index < Count; ++Index)
 	{
-		FRenderPacket& P = RenderPackets[Index];
+		const FRenderPacket& P = RenderPackets[Index];
 		const FMatrix& Model = GetPacketWorld(P);
-		WriteObjectSlot(Dest, Index, Model);
-		P.Slot = Index;
+		const bool bReceiveShadow = !P.Proxy || !P.Proxy->GetComponent() || P.Proxy->GetComponent()->ReceivesShadow();
+		WriteObjectSlot(Dest, Index, Model, bReceiveShadow);
+		RenderPackets[Index].Slot = Index;
 	}
 
 	RenderCommand::Unmap(PerObjectSlotCB.get());
@@ -252,7 +307,8 @@ void FRenderer::DrawStaticGroups(const EViewMode ViewMode)
 			else
 			{
 				RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
-				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld());
+				const UPrimitiveComponent* Component = Item.Proxy->GetComponent();
+				UpdatePerObjectConstants(Item.Proxy->GetLocalToWorld(), !Component || Component->ReceivesShadow());
 			}
 			RenderCommand::DrawIndexed(Item.IndexCount, Item.StartIndex);
 		}
@@ -648,18 +704,16 @@ void FRenderer::UpdateMaterialParams(const FRenderPacket& RenderPacket)
 // b0 MVP 채우고 꽂기
 void FRenderer::UpdatePerObjectConstants(const FRenderPacket& RenderPacket, const FMatrix& ViewProjection)
 {
-	// rp.Transform 과 Camera VP 행렬 곱
-	// 행렬곱의 결과 (MVP Matrix) Constant Buffer 업데이트 필요
-
-	UpdatePerObjectConstants(GetPacketWorld(RenderPacket));
+	const UPrimitiveComponent* Component = RenderPacket.Proxy ? RenderPacket.Proxy->GetComponent() : nullptr;
+	UpdatePerObjectConstants(GetPacketWorld(RenderPacket), !Component || Component->ReceivesShadow());
 }
 
-void FRenderer::UpdatePerObjectConstants(const FMatrix& World)
+void FRenderer::UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow)
 {
-	FPerObjectConstants Constants;
-
+	FPerObjectConstants Constants{};
 	Constants.World = World;
 	Constants.WorldInvTranspose = World.Inverse().GetTransposed();
+	Constants.bReceiveShadow = bReceiveShadow ? 1.0f : 0.0f;
 
 	RenderCommand::UpdateBufferData(PerObjectCB.get(), &Constants);
 }

@@ -8,7 +8,6 @@
 #include "Core/StatOverlay.h"
 #include "Input/InputSystem.h"
 
-
 #include "Render/GeometryGenerator.h"
 
 #include "Engine/World.h"
@@ -29,6 +28,7 @@
 #include "Editor/HitoriEd/EditorFileUtils.h"
 #include "UObject/UObjectIterator.h"
 #include "Component/BillboardComponent.h"
+#include "Component/DirectionalLightComponent.h"
 
 #include "Core/EngineLog.h"
 #include "Core/Stats/LightweightStats.h"
@@ -115,12 +115,25 @@ bool UEditorEngine::Init()
 	DepthViewRenderer = MakeUnique<FDepthViewRenderer>();
 	DepthViewRenderer->Init();
 
+	ShadowRenderer = MakeUnique<FShadowRenderer>();
+	if (!ShadowRenderer->Init(1024))
+	{
+		HTR_LOG(Warning, "ShadowRenderer initialization failed.");
+		ShadowRenderer.reset();
+	}
+
 	BillboardRenderer = MakeUnique<FBillboardRenderer>();
 	BillboardRenderer->Init();
 
 
 	// 필요한 Panel들 추가후 raw pointer 반환(소유권 = EditorUI)
 	DetailsPanel = EditorUI->AddEditorPanel<FDetailsPanel>();
+
+	DetailsPanel->SetShadowMapProvider([this]() -> FTexture2D*
+		{
+			return ShadowRenderer ? ShadowRenderer->GetShadowMap() : nullptr;
+		});
+
 	EditorControlsPanel = EditorUI->AddEditorPanel<FEditorControlsPanel>();
 	ViewportsPanel = EditorUI->AddEditorPanel<FViewportsPanel>();
 	ContentDrawerPanel = EditorUI->AddEditorPanel<FContentDrawerPanel>();
@@ -144,13 +157,16 @@ bool UEditorEngine::Init()
 
 	// 투영 행렬 생성 
 	MultipleViewportsAdapter.InitializeFromWorld(*GetActiveWorld());
+
 	// 화면 나눔 비율 설정 가져오기
 	MultipleViewportsAdapter.SetSplitRatio({
 		SettingsPanel->GetSettings().MultipleViewportsHorizontal,
 		SettingsPanel->GetSettings().MultipleViewportsVertical });
+
 	// SingleView에 사용할 인덱스 설정
 	MultipleViewportsAdapter.SetSingleViewIndex(
 		SettingsPanel->GetSettings().MultipleViewportsSingleViewIndex);
+
 	// 뷰포트 레이아웃 설정
 	MultipleViewportsAdapter.SetLayoutMode(
 		SettingsPanel->GetSettings().bMultipleViewportsSingle
@@ -944,6 +960,42 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	const bool bTileCull = bPrepass && (IsPerPixelLit(ViewMode) || bLightCullingView); //라이트 컬링을 할 것인가
 
 	//0. 정렬
+	const FScene& Scene = ViewWorld.GetScene();
+	bool bShadowMapReady = false;
+	FMatrix ShadowLightVP = FMatrix::Identity;
+
+	if (ShadowRenderer && Settings.bDrawPrimitives && ViewMode != EViewMode::Unlit)
+	{
+		const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
+
+		for (ULightComponentBase* Light : Scene.LightComponents)
+		{
+			UDirectionalLightComponent* DirectionalLight = Cast<UDirectionalLightComponent>(Light);
+			if (!DirectionalLight || !DirectionalLight->CastsShadows())
+				continue;
+
+			FTransform LightTransform;
+			LightTransform.Rotation = DirectionalLight->GetWorldRotation();
+			const FVector LightDirection = LightTransform.GetForward().Normalized();
+
+			// 카메라 절두체 중 최대 100 단위 거리까지 그림자 영역으로 사용한다.
+			const float ShadowDistance = std::min(Projection.FarClip, 100.0f);
+			const FMatrix LightVP = ShadowRenderer->BuildDirectionalLightVP(ViewProjection, Projection.NearClip, Projection.FarClip, ShadowDistance, LightDirection);
+
+			ShadowRenderer->BeginShadowPass();
+			Renderer->RenderShadowDepth(Scene, LightVP);
+			ShadowRenderer->EndShadowPass();
+
+			ShadowLightVP = LightVP;
+			bShadowMapReady = true;
+			break;
+		}
+	}
+
+	if (ShadowRenderer)
+		ShadowRenderer->BindLightVP(ShadowLightVP, bShadowMapReady);
+
+	// Shadow Pass가 변경한 ViewCB를 메인 카메라 정보로 갱신한다.
 	if (Settings.bDrawPrimitives)
 		Renderer->RenderQueueSorting(RenderQueue, ViewProjection, ViewCameraLocation);
 
@@ -958,9 +1010,15 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 		bTileCulled = ComputeTileBasedLight(ViewIndex, ViewRenderingInfo, ViewProjection);
 	}
 
+	// Shadow Pass에서 만든 깊이 텍스처를 메인 Pixel Shader에 전달한다.
+	if (bShadowMapReady)
+		RenderCommand::BindShaderResource(10, ShadowRenderer->GetShadowMap(), EShaderBindFlagBits::Pixel);
+
 	// 1. 불투명 Pass
 	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, bPrepass, bTileCulled);
 	
+	// 다음 Shadow Pass에서 같은 텍스처를 DSV로 사용할 수 있도록 SRV 바인딩을 해제한다.
+	RenderCommand::UnbindShaderResource(10, EShaderBindFlagBits::Pixel);
 
 	if (SettingsPanel->GetSettings().bDepthView)
 	{
@@ -979,12 +1037,8 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 			RenderFXAAPass(ViewIndex, ViewRenderingInfo);
 	}
 
-
-
 	// 4. 오버레이 Pass
 	RenderOverlayPass(ViewIndex, ViewWorld, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, RenderQueue);
-
-
 }
 
 

@@ -12,6 +12,8 @@
 
 constexpr uint32 ObjectSlotBytes = 256;
 
+class FScene;
+
 struct FViewConstants
 {
 	FMatrix VP;
@@ -23,6 +25,8 @@ struct FPerObjectConstants
 {
 	FMatrix World;
 	FMatrix WorldInvTranspose;
+	float bReceiveShadow = 1.0f;
+	float ShadowPadding[3] = {};
 };
 
 struct FSortEntry
@@ -108,6 +112,7 @@ public:
 	bool Init();
 
 	void DepthPrepass(const FMatrix& ViewProjection, const EViewMode ViewMode);
+	void RenderShadowDepth(const FScene& Scene, const FMatrix& LightVP);
 
 	// 기존 단일 카메라의 ViewProjection으로 렌더 큐 전체를 그린다.
 	void RenderAll(FRenderQueue& InQueue, UCameraComponent* CameraComponent, const EViewMode ViewMode);
@@ -144,19 +149,21 @@ public:
 	void SetLight(const FLightConstants& LightData);
 
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
-	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World)
+	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World, bool bReceiveShadow = true)
 	{
-		FPerObjectConstants Constants;
+		FPerObjectConstants Constants{};
 		Constants.World = World;
 		Constants.WorldInvTranspose = World.Inverse().GetTransposed();
+		Constants.bReceiveShadow = bReceiveShadow ? 1.0f : 0.0f;
 		std::memcpy(SlotBase + size_t(SlotIndex) * ObjectSlotBytes, &Constants, sizeof(Constants));
 	}
 
-	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World, const FMatrix& WorldInverse)
+	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World, const FMatrix& WorldInverse, bool bReceiveShadow = true)
 	{
-		FPerObjectConstants Constants;
+		FPerObjectConstants Constants{};
 		Constants.World = World;
 		Constants.WorldInvTranspose = WorldInverse.GetTransposed();
+		Constants.bReceiveShadow = bReceiveShadow ? 1.0f : 0.0f;
 		std::memcpy(SlotBase + size_t(SlotIndex) * ObjectSlotBytes, &Constants, sizeof(Constants));
 	}
 
@@ -195,7 +202,7 @@ private:
 	void BindLightResources();
 	void DrawPackets(uint32 Begin, uint32 End, const FMatrix& ViewProjection, const EViewMode ViewMode);
 	void DrawStaticGroups(const EViewMode ViewMode);
-	void UpdatePerObjectConstants(const FMatrix& World);
+	void UpdatePerObjectConstants(const FMatrix& World, bool bReceiveShadow = true);
 
 	// 이번 프레임 스태틱 메시 묶음 (정렬 키 순). 비어 있지 않은 것만 담는다.
 	std::vector<const FStaticDrawGroup*> StaticGroups;

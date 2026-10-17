@@ -1039,6 +1039,18 @@ void FDetailsPanel::OnRender()
 			ImGui::SeparatorText("Component Properties");
 			DrawProperties(TargetComponent, CustomFont);
 
+			if (Cast<UDirectionalLightComponent>(TargetComponent) && ShadowMapProvider)
+			{
+				FTexture2D* ShadowMap = ShadowMapProvider();
+
+				if (ShadowMap && ShadowMap->GetSRV())
+				{
+					ImGui::SeparatorText("Shadow Depth Map");
+
+					const float Size = std::min(ImGui::GetContentRegionAvail().x, 256.0f);
+					ImGui::Image((ImTextureID)ShadowMap->GetSRV(), ImVec2(Size, Size));
+				}
+			}
 			if(SelectCandidateComponent != TargetComponent)
 			{
 				SelectComponent(TargetComponent);

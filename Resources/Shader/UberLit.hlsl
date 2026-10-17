@@ -20,6 +20,8 @@ cbuffer Worldconstants : register(b2)
 {
     matrix World;
     matrix WorldInvTranspose;
+    float bReceiveShadow;
+    float3 ReceiverPadding;
 };
 
 cbuffer MaterialParams : register(b1)
@@ -76,6 +78,8 @@ cbuffer LightConstants : register(b3)
 StructuredBuffer<FPointLightInfo> PointLights : register(t8);
 StructuredBuffer<FSpotLightInfo> SpotLights : register(t9);
 
+Texture2D<float> ShadowMap : register(t10);
+
 cbuffer TileBasedCullingConstants : register(b4)
 {
     matrix View;
@@ -87,6 +91,13 @@ cbuffer TileBasedCullingConstants : register(b4)
     uint TilePointLightCount;
     uint TileSpotLightCount;
     uint2 Padding;
+};
+
+cbuffer ShadowConstants : register(b5)
+{
+    matrix ShadowLightVP;
+    float ShadowEnabled;
+    float3 ShadowPadding;
 };
 
 #define TILE_SIZE 16
@@ -205,7 +216,7 @@ FLightResult CalculateDirectionalLight(FDirectionalLightInfo info, float3 normal
     return BlinnPhong(normal, lightDir, viewDir, radiance);
 }
 
-FLightResult CalculateLightingTiled(float2 PixelPos, float3 worldPos, float3 normal, float3 viewDir)
+FLightResult CalculateLightingTiled(float2 PixelPos, float3 worldPos, float3 normal, float3 viewDir, float ShadowFactor)
 {
     FLightResult Total;
     Total.Diffuse = float3(0, 0, 0);
@@ -232,13 +243,13 @@ FLightResult CalculateLightingTiled(float2 PixelPos, float3 worldPos, float3 nor
         Total.Specular += Light.Specular;
     }
     FLightResult Directional = CalculateDirectionalLight(DirectionalLight, normal, viewDir);
-    Total.Diffuse += Directional.Diffuse;
-    Total.Specular += Directional.Specular;
+    Total.Diffuse += Directional.Diffuse * ShadowFactor;
+    Total.Specular += Directional.Specular * ShadowFactor;
     return Total;
 }
 
 // 직접광(Point·Spot·Directional)의 Diffuse/Specular 합. Ambient는 따로 더한다.
-FLightResult CalculateLighting(float3 worldPos, float3 normal, float3 viewDir)
+FLightResult CalculateLighting(float3 worldPos, float3 normal, float3 viewDir, float ShadowFactor)
 {
     FLightResult Total;
     Total.Diffuse = float3(0, 0, 0);
@@ -262,12 +273,35 @@ FLightResult CalculateLighting(float3 worldPos, float3 normal, float3 viewDir)
 
     //Directional Light
     FLightResult Directional = CalculateDirectionalLight(DirectionalLight, normal, viewDir);
-    Total.Diffuse += Directional.Diffuse;
-    Total.Specular += Directional.Specular;
+    Total.Diffuse += Directional.Diffuse * ShadowFactor;
+    Total.Specular += Directional.Specular * ShadowFactor;
 
     return Total;
 }
 
+float CalculateShadowFactor(float3 WorldPos)
+{
+    if (ShadowEnabled < 0.5f)
+        return 1.0f;
+    
+    float4 LightClip = mul(float4(WorldPos, 1.0f), ShadowLightVP);
+    float3 NDC = LightClip.xyz / LightClip.w;
+
+    // 광원 NDC 좌표를 Shadow Map 텍스처 좌표로 변환한다.
+    float2 UV = float2(NDC.x * 0.5f + 0.5f, 0.5f - NDC.y * 0.5f);
+    
+    if (any(UV < 0.0f) || any(UV >= 1.0f) || NDC.z < 0.0f || NDC.z > 1.0f)
+        return 1.0f;
+
+    uint Width, Height;
+    ShadowMap.GetDimensions(Width, Height);
+
+    float StoredDepth = ShadowMap.Load(int3(int2(UV * float2(Width, Height)), 0));
+
+    // 자신의 깊이가 기록된 깊이보다 멀다면 다른 물체에 가려진 것이다.
+    const float Bias = 0.00005f;
+    return NDC.z - Bias > StoredDepth ? 0.0f : 1.0f;
+}
 
 struct VS_INPUT
 {
@@ -291,6 +325,7 @@ struct PS_INPUT
 #endif
     float3 tangentWorld : TEXCOORD4;
     nointerpolation float tangentSign : TEXCOORD5;
+    nointerpolation float receiveShadow : TEXCOORD6;
 };
 
 Texture2D g_txColor : register(t0);
@@ -313,12 +348,15 @@ PS_INPUT mainVS(VS_INPUT input)
     
 #if LIGHTING_MODEL_GOURAUD
     float3 viewDir = normalize(CameraLocation - output.worldPos);
-    FLightResult Light = CalculateLighting(output.worldPos, output.normal, viewDir);
+    FLightResult Light = CalculateLighting(output.worldPos, output.normal, viewDir, 1.0f);
     output.Diffuse = Light.Diffuse;
     output.Specular = Light.Specular;
 #endif
+    
     output.color = input.c;
     output.uv = input.t;
+    output.receiveShadow = bReceiveShadow;
+    
     return output;
 }
 
@@ -385,7 +423,7 @@ float4 mainPS(PS_INPUT input) : SV_TARGET
         Heat *= 0.5f;
     return float4(Heat, 1.0f);
 #endif
-   
+    
     albedo.rgb = pow(albedo.rgb, 2.2f);
     float3 viewDir = normalize(CameraLocation - input.worldPos);   // 표면 → 카메라
     float3 ambient = CalculateAmbientLight(AmbientLight);
@@ -399,11 +437,13 @@ float4 mainPS(PS_INPUT input) : SV_TARGET
     return float4(finalRGB, alpha);
 #endif
 
+    float ShadowFactor = input.receiveShadow > 0.5f ? CalculateShadowFactor(input.worldPos) : 1.0f;
+
     FLightResult Light;
     if (TileCount.x > 0)
-        Light = CalculateLightingTiled(input.position.xy, input.worldPos, normal, viewDir);
+        Light = CalculateLightingTiled(input.position.xy, input.worldPos, normal, viewDir, ShadowFactor);
     else
-        Light = CalculateLighting(input.worldPos, normal, viewDir);
+        Light = CalculateLighting(input.worldPos, normal, viewDir, ShadowFactor);
     
 #if LIGHTING_MODEL_PHONG
     finalRGB =  finalRGB * (ambient + Light.Diffuse) + Light.Specular;

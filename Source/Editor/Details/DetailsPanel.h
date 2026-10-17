@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 
 struct FTransform;
+class FTexture2D;
 
 using DetailsSelectionCallback = std::function<void(UActorComponent*)>;
 using DetailsDeleteComponentCallback = std::function<void(UActorComponent*)>;
@@ -35,6 +36,8 @@ public:
 
 	ImFont* GetCustomFont() { return CustomFont; }
 
+	void SetShadowMapProvider(std::function<FTexture2D* ()> InProvider)	{ ShadowMapProvider = std::move(InProvider); }
+
 private:
 	void DrawSceneComponentNode(USceneComponent* Component, USceneComponent* Root, UActorComponent*& OutSelectedComponent);
 	void TryReparent(USceneComponent* DroppedComponent, USceneComponent* DragComponent);
@@ -42,6 +45,8 @@ private:
 
 	UWorld* World = nullptr;
 	ImFont* CustomFont = nullptr;
+
+	std::function<FTexture2D* ()> ShadowMapProvider;
 
 	AActor* TargetActor = nullptr;
 	UActorComponent* TargetComponent = nullptr;

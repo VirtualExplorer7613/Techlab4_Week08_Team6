@@ -120,6 +120,7 @@ public:
 
     FMatrix GetEngineViewMatrix(int32 ViewIndex) const;
 	FMatrix GetEngineProjectionMatrix(int32 ViewIndex) const;
+    FCameraProjection GetRenderProjection(int32 ViewIndex) const { return GetRenderCamera(ViewIndex).Projection; }
 
 private:
     // Override가 있으면 그 카메라를, 없으면 저장 카메라를 반환한다. 외부 View는 Override만 쓴다.
