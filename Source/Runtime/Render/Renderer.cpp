@@ -8,6 +8,7 @@
 #include "Core/Stats/LightweightStats.h"
 
 #include "Engine/PrimitiveSceneProxy.h"
+#include "Engine/Scene.h"
 
 #include "RenderCommand.h"
 #include "RenderResourceManager.h"
@@ -101,18 +102,10 @@ bool FRenderer::Init()
 	ViewCB = RenderCommand::CreateConstantBuffer(sizeof(FViewConstants));
 	LightCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGlobalConstants));
 
-    D3D11_TEXTURE2D_DESC ShadowMapDesc{};
-    ShadowMapDesc.Width = 2048;
-    ShadowMapDesc.Height = 2048;
-    ShadowMapDesc.MipLevels = 1;
-    ShadowMapDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
-    ShadowMapDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
-    ShadowMapDesc.ArraySize = 1;
-    ShadowMapDesc.SampleDesc.Count = 1;
-    ShadowMapDesc.SampleDesc.Quality = 0;
+    ShadowRenderer = MakeUnique<FShadowRenderer>();
 
-	DirectionalShadowMap = RenderCommand::CreateTexture2D(ShadowMapDesc);
-    SpotShadowMap = RenderCommand::CreateTexture2D(ShadowMapDesc);
+    if (!ShadowRenderer->Init(2048))
+        return false;
 
 	if (!CreateDynamicStructuredBuffer(sizeof(FPointLight), NUM_POINT_LIGHT, PointLightBuffer, PointLightSRV) || !CreateDynamicStructuredBuffer(sizeof(FSpotLight), NUM_SPOT_LIGHT, SpotLightBuffer, SpotLightSRV))
 	{
@@ -213,8 +206,8 @@ void FRenderer::BindLightResources()
 	Context->VSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 	Context->PSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 
-    RenderCommand::BindShaderResource(10, DirectionalShadowMap.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindShaderResource(11, SpotShadowMap.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindShaderResource(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindShaderResource(11, GetSpotShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindSamplerState(1, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 }
 
@@ -775,51 +768,83 @@ void FRenderer::RenderSpotShadowMap(const FMatrix &CameraViewProjection, const F
 
 void FRenderer::RenderDirectionalShadowMap(const FMatrix &CameraViewProjection, const FVector &CameraLocation , const EViewMode ViewMode)
 {
-    if (LightData.DirectionalLight.ShadowParameters.W <= 0.0f)
-    {
-        return;
-    }        
+    FViewConstants ViewConstants{};
+    ViewConstants.VP = LightVP;
+    RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
 
-    // SRV Unbinding
+    RenderCommand::BindConstantBuffer(0, ViewCB.get(), EShaderBindFlagBits::Vertex);
+    RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
+
+    bDepthOnly = true;
+    RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    for (const FPrimitiveSceneProxy *Proxy : Scene.Proxies)
+    {
+        if (!Proxy || !Proxy->IsVisible() || !Proxy->GetCastShadows())
+            continue;
+
+        UStaticMesh *Mesh = Proxy->GetMesh();
+        if (!Mesh || !Proxy->GetRenderState() || Proxy->GetLODCount() == 0)
+            continue;
+
+        // 현재는 첫 번째 LOD를 사용한다.
+        RenderCommand::BindMesh(Mesh, 0);
+        UpdatePerObjectConstants(Proxy->GetLocalToWorld(), Proxy->GetReceiveShadows());
+
+        const FCachedMeshLOD &LOD = Proxy->GetLOD(0);
+
+        for (uint32 i = 0; i < LOD.NumSections; ++i)
+        {
+            const FCachedMeshSection &Section = Proxy->GetSection(LOD.FirstSection + i);
+            if (!Section.Material || !Section.Material->Shader)
+                continue;
+
+            // Depth Only 모드이므로 Pixel Shader는 비활성화된다.
+            BindMaterial(Section.Material, EViewMode::Unlit);
+            RenderCommand::DrawIndexed(Section.IndexCount, Section.StartIndex);
+        }
+    }
+
+    bDepthOnly = false;
+}
+
+
+bool FRenderer::RenderShadowDepth(const FScene& Scene, const FShadowPassDesc &Desc, const FMatrix &LightVP, EViewMode ViewMode)
+{
+    if (!ShadowRenderer || !ShadowRenderer->BeginShadowPass(Desc))
+        return false;
+
+    DrawShadowCasters(Scene, LightVP, ViewMode);
+
+    ShadowRenderer->EndShadowPass();
+    return true;
+}
+
+void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
+{
+    if (LightData.DirectionalLight.ShadowParameters.W <= 0.0f)
+        return;
+
+    FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetDirectionalShadowMap() : nullptr;
+    if (!ShadowMap || !ShadowMap->GetDSV())
+        return;
+
+    // 같은 텍스처를 SRV와 DSV로 동시에 바인딩하지 않도록 해제
     RenderCommand::UnbindShaderResource(10, EShaderBindFlagBits::Pixel);
 
     const FMatrix &LightVP = LightData.DirectionalLight.ViewProjection;
 
-    // Set up the rendering info for the shadow pass
-    FRenderingInfo ShadowPassInfo;
-    ShadowPassInfo.ViewportSetting = {0, 0, 2048, 2048, 0.0f, 1.0f};
-    ShadowPassInfo.ColorRenderTargets.Reset();
-    ShadowPassInfo.DepthStencil.Texture = DirectionalShadowMap.get();
-    ShadowPassInfo.DepthStencil.LoadOp = ERenderTargetLoadOp::Clear;
-    ShadowPassInfo.DepthStencil.ClearValue.DepthClearValue = 1.0f;
+    FShadowPassDesc Desc{};
+    Desc.DepthView = ShadowMap->GetDSV();
+    Desc.Width = ShadowMap->GetWidth();
+    Desc.Height = ShadowMap->GetHeight();
 
-    // Change the rasterizer, depth-stencil, and blend states for shadow rendering
-    ERasterizerState RasterizerState = ERasterizerState::SolidBack;
-    EDepthStencilState DepthStencilState = EDepthStencilState::Default;
-    EBlendState BlendState = EBlendState::NoColorWrite;
+    if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode))
+        return;
 
-    RenderCommand::BeginRenderPass(ShadowPassInfo);
-
-    RenderCommand::SetRasterizerState(RasterizerState);
-    RenderCommand::SetDepthStencilState(DepthStencilState);
-    RenderCommand::SetBlendState(BlendState);
-
-    FViewConstants ViewConstants;
-    ViewConstants.VP = LightVP;
-    RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
-
-    bDepthOnly = true;
-    bShadowMapPass = true;
-
-    DrawStaticGroups(ViewMode);
-    DrawPackets(0, FirstTranslucentIndex, LightVP, ViewMode);
-
-    bDepthOnly = false;
-    bShadowMapPass = false;
-
-    RenderCommand::EndRenderPass(ShadowPassInfo);
-
-    ViewConstants.VP = CameraViewProjection;
-    ViewConstants.CameraPosition = CameraLocation;
-    RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
+    // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
+    FViewConstants CameraViewConstants{};
+    CameraViewConstants.VP = CameraViewProjection;
+    CameraViewConstants.CameraPosition = CameraLocation;
+    RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
 }

@@ -10,6 +10,7 @@ static FPlane NormalizePlane(const FPlane Plane);
 FFrustumPlanes ExtractFrustumPlanes(const FMatrix& Matrix);
 bool IsAABBInFrustum(const FAABB& Bounds, const FFrustumPlanes& Frustum);
 FAABB MakeWorldBounds(const FBox& Value);
+std::array<FVector, 8> GetFrustumCornersWorld(const FMatrix& ViewProjection);
 
 enum class EFrustumTest : uint8 { Outside, Intersect, Inside };
 

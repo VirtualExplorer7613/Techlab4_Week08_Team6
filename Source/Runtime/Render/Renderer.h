@@ -9,6 +9,7 @@
 #include "Occlusion/GPUOcclusion.h"
 #include "TileBasedCulling/TileBasedCulling.h"
 #include "Shared/LightDefinitions.h"
+#include "Shadow/ShadowRenderer.h"
 
 constexpr uint32 ObjectSlotBytes = 256;
 
@@ -34,6 +35,7 @@ struct FSortEntry
 };
 
 class UCameraComponent;
+class FScene;
 
 // 오클루전 컬링의 효과 상한을 재기 위한 측정 결과 (디버그 전용)
 struct FOcclusionMeasureResult
@@ -56,8 +58,9 @@ struct alignas(16) FPointLight
 	FVector4 PositionRadius = FVector4(0, 0, 0, 0); // xyz: 위치, w: 반경
 	FVector4 ColorIntensity = FVector4(0, 0, 0, 0); // rgb: 색상, w: 강도
 	FVector4 FalloffEnabled = FVector4(1, 0, 0, 0); // x: 반경 감쇠, y: 사용 여부, zw: 패딩
+    FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
 };
-static_assert(sizeof(FPointLight) == 48, "FPointLight must be 48 bytes");
+static_assert(sizeof(FPointLight) == 64, "FPointLight must be 64 bytes");
 
 struct alignas(16) FSpotLight
 {
@@ -149,8 +152,9 @@ public:
 
 	void SetLight(const FLightConstants& LightData);
 
-    void RenderSpotShadowMap(const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
-    void RenderDirectionalShadowMap(const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+    bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc &Desc, const FMatrix &LightVP, EViewMode ViewMode);
+    void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+    void RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
 
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
 	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World)
@@ -193,17 +197,21 @@ public:
 	uint32 GetPointLightCount() const { return LightData.PointLightCount; }
 	uint32 GetSpotLightCount() const { return LightData.SpotLightCount; }
 
-    ID3D11ShaderResourceView *GetDirectionalShadowMapSRV() const
+    FTexture2D *GetDirectionalShadowMap() const
     {
-        return DirectionalShadowMap ? DirectionalShadowMap->GetSRV() : nullptr;
+        return ShadowRenderer ? ShadowRenderer->GetDirectionalShadowMap() : nullptr;
     }
+
+    
     ID3D11ShaderResourceView *GetSpotShadowMapSRV() const
     {
         return SpotShadowMap ? SpotShadowMap->GetSRV() : nullptr;
     }
-    FTexture2D *GetDirectionalShadowMap() const
+
+	ID3D11ShaderResourceView* GetDirectionalShadowMapSRV() const
     {
-        return DirectionalShadowMap.get();
+        FTexture2D *ShadowMap = GetDirectionalShadowMap();
+        return ShadowMap ? ShadowMap->GetSRV() : nullptr;
     }
 
     FTexture2D *GetSpotShadowMap() const
@@ -261,8 +269,9 @@ private:
 	ComPtr<ID3D11Buffer> SpotLightBuffer;
 	ComPtr<ID3D11ShaderResourceView> SpotLightSRV;
 
-    TUniquePtr<FTexture2D> DirectionalShadowMap;
-    TUniquePtr<FTexture2D> SpotShadowMap;
+    TUniquePtr<FShadowRenderer> ShadowRenderer;
+
+    void DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, EViewMode ViewMode);
 
 	//DepthPrepass 시 잠깐 켜짐, 머테리얼 바인딩을 건너뜀
 	bool bDepthOnly = false;
