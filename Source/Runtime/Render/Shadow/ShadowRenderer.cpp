@@ -123,7 +123,15 @@ bool FShadowRenderer::Init(uint32 ShadowMapSize)
     {
         DirectionalShadowMap.reset();
         return false;
-    }    
+    }
+
+    SpotShadowMap = RenderCommand::CreateTexture2D(DirectionalDesc);
+
+    if (!SpotShadowMap || !SpotShadowMap->GetRawPtr() || !SpotShadowMap->GetDSV() || !SpotShadowMap->GetSRV())
+    {
+        SpotShadowMap.reset();
+        return false;
+    }
 
     return true;
 }

@@ -206,8 +206,9 @@ void FRenderer::BindLightResources()
 	Context->VSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 	Context->PSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 
-    RenderCommand::BindShaderResource(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel);
-    RenderCommand::BindSamplerState(1, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel);
+    RenderCommand::BindShaderResource(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindShaderResource(11, GetSpotShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindSamplerState(1, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 }
 
 void FRenderer::RenderOpaque(const FMatrix& ViewProjection, const EViewMode ViewMode, bool bDepthPrepassed)
@@ -714,7 +715,6 @@ void FRenderer::SetLight(const FLightConstants& InLightData)
 	UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
 }
 
-
 void FRenderer::DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, EViewMode ViewMode)
 {
     FViewConstants ViewConstants{};
@@ -779,9 +779,39 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &C
         return;
 
     // 같은 텍스처를 SRV와 DSV로 동시에 바인딩하지 않도록 해제
-    RenderCommand::UnbindShaderResource(10, EShaderBindFlagBits::Pixel);
+    RenderCommand::UnbindShaderResource(10, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
     const FMatrix &LightVP = LightData.DirectionalLight.ViewProjection;
+
+    FShadowPassDesc Desc{};
+    Desc.DepthView = ShadowMap->GetDSV();
+    Desc.Width = ShadowMap->GetWidth();
+    Desc.Height = ShadowMap->GetHeight();
+
+    if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode))
+        return;
+
+    // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
+    FViewConstants CameraViewConstants{};
+    CameraViewConstants.VP = CameraViewProjection;
+    CameraViewConstants.CameraPosition = CameraLocation;
+    RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
+}
+
+void FRenderer::RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
+{
+    // 그림자를 만드는 Spot은 0번 하나뿐이다
+    if (LightData.SpotLightCount == 0 || LightData.SpotLights[0].ShadowParameters.W <= 0.0f)
+        return;
+
+    FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetSpotShadowMap() : nullptr;
+    if (!ShadowMap || !ShadowMap->GetDSV())
+        return;
+
+    // 같은 텍스처를 SRV와 DSV로 동시에 바인딩하지 않도록 해제 (Gouraud는 VS에서도 읽는다)
+    RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+
+    const FMatrix &LightVP = LightData.SpotLights[0].ViewProjection;
 
     FShadowPassDesc Desc{};
     Desc.DepthView = ShadowMap->GetDSV();

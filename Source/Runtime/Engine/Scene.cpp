@@ -218,10 +218,10 @@ void FScene::UpdateLightComponents(FRenderer *Renderer) {
       if (Constants.SpotLightCount >= NUM_SPOT_LIGHT) {
         continue;
       }
-
+      SpotLightComponent->SetShadowMapTexture(Renderer->GetSpotShadowMap());
       UpdateSpotLight(Constants, SpotLightComponent);
     } else if (UPointLightComponent *PointLightComponent =
-                   Cast<UPointLightComponent>(LightComponent)) {
+                   Cast<UPointLightComponent>(LightComponent)) {        
       if (Constants.PointLightCount >= NUM_POINT_LIGHT) {
         continue;
       }
@@ -317,8 +317,27 @@ void FScene::UpdateSpotLight(FLightConstants &LightConstants,
 
   SpotData.OutAngleInvCosDiff =
       FVector4(std::max<float>(cosOuter, 0.001f), InvCosDiff, 0.f, 0.f);
+  const FVector Direction = WorldTransform.GetForward().Normalized();
+  SpotData.ForwardVector = Direction;
 
-  SpotData.ForwardVector = FVector4(WorldTransform.GetForward(), 0.f);
+  const FVector UpVector = WorldTransform.GetUp().Normalized();
+  const FVector EyePos = WorldTransform.Location;
+
+  const float ShadowRadius = LightComponent->GetAttenuationRadius();
+
+
+  const FMatrix ViewMatrix = FMatrix::MakeLookAt(EyePos, EyePos + Direction, UpVector);
+  const FMatrix PerspectiveMatrix = FMatrix::MakePerspective(FMath::DegreesToRadians(SafeOuterAngle) * 2.0f,
+                                                        1.0f,
+                                                        LightComponent->GetNearPlane(),
+                                                        ShadowRadius);
+
+  SpotData.ViewProjection = ViewMatrix * PerspectiveMatrix;
+
+  SpotData.ShadowParameters = FVector4(std::max<float>(LightComponent->GetShadowDepthBias(), 0.001f),
+                                              std::max<float>(LightComponent->GetShadowSlopeBias(), 0.001f),
+                                              1.f / static_cast<float>(LightComponent->GetShadowMapWidth()),
+                                              LightComponent->GetCastShadows() ? 1.f : 0.f);
 
   LightConstants.SpotLights[LightConstants.SpotLightCount] = SpotData;
   LightConstants.SpotLightCount++;

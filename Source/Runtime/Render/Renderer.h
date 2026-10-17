@@ -69,8 +69,10 @@ struct alignas(16) FSpotLight
 	FVector4 FalloffEnabled = FVector4(1, 0, 1, 0); // x: 반경 감쇠, y: 사용 여부, z : 콘 사이 감쇠, w: 패딩
 	FVector4 OutAngleInvCosDiff = FVector4(0, 0, 0, 0);// x : cosOuter, y : 1 / (cosInner - cosOuter)
 	FVector4 ForwardVector = FVector4(1, 0, 0, 0);		// xyz : 전방벡터
+    FMatrix ViewProjection;                            // ViewProjection 행렬. 그림자 맵을 만들 때 사용
+    FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
 };
-static_assert(sizeof(FSpotLight) == 80, "FSpotLight must be 80 bytes");
+static_assert(sizeof(FSpotLight) == 160, "FSpotLight must be 80 bytes");
 
 struct alignas(16) FAmbientLight
 {
@@ -152,6 +154,7 @@ public:
 
     bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc &Desc, const FMatrix &LightVP, EViewMode ViewMode);
     void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+    void RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
 
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
 	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World)
@@ -199,10 +202,21 @@ public:
         return ShadowRenderer ? ShadowRenderer->GetDirectionalShadowMap() : nullptr;
     }
 
-    ID3D11ShaderResourceView *GetDirectionalShadowMapSRV() const
+    FTexture2D *GetSpotShadowMap() const
     {
-        FTexture2D *ShadowMap = GetDirectionalShadowMap();
-        return ShadowMap ? ShadowMap->GetSRV() : nullptr;
+        return ShadowRenderer ? ShadowRenderer->GetSpotShadowMap() : nullptr;
+    }
+
+    ID3D11ShaderResourceView *GetSpotShadowMapSRV() const
+    {
+        FTexture2D *SpotShadowMap = GetSpotShadowMap();
+        return SpotShadowMap ? SpotShadowMap->GetSRV() : nullptr;
+    }
+
+	ID3D11ShaderResourceView* GetDirectionalShadowMapSRV() const
+    {
+        FTexture2D *DirectionalShadowMap = GetDirectionalShadowMap();
+        return DirectionalShadowMap ? DirectionalShadowMap->GetSRV() : nullptr;
     }
 
 private:

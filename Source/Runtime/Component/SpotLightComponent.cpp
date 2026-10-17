@@ -71,6 +71,11 @@ namespace
 	}
 }
 
+USpotLightComponent::USpotLightComponent()
+{
+    SetNearPlane(0.1f);
+}
+
 void USpotLightComponent::DrawDebug(FLineBatcher* LineBatcher) const
 {
 	if (LineBatcher == nullptr)
