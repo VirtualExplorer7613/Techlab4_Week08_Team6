@@ -213,7 +213,7 @@ void FScene::MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy)
 }
 
 
-void FScene::UpdateLightComponents(FRenderer* Renderer)
+void FScene::UpdateLightComponents(FRenderer* Renderer, const FMatrix& CameraViewProjection)
 {
 	if (!Renderer)
 		return;
@@ -264,7 +264,7 @@ void FScene::UpdateLightComponents(FRenderer* Renderer)
 
 		else if (UDirectionalLightComponent* DirectionalLightComponent = Cast<UDirectionalLightComponent>(LightComponent))
 		{
-			UpdateDirectionalLight(Constants, DirectionalLightComponent, ShadowInfo);
+			UpdateDirectionalLight(Constants, DirectionalLightComponent, CameraViewProjection, ShadowInfo);
 		}
 	}
 
@@ -399,7 +399,7 @@ void FScene::UpdateAmbientLight(FLightConstants & LightConstants, UAmbientLightC
 	LightConstants.AmbientLight = AmbientData;
 }
 
-void FScene::UpdateDirectionalLight(FLightConstants& LightConstants, UDirectionalLightComponent* LightComponent, FDirectionalShadowInfo& OutShadowInfo)
+void FScene::UpdateDirectionalLight(FLightConstants& LightConstants, UDirectionalLightComponent* LightComponent, const FMatrix& CameraViewProjection, FDirectionalShadowInfo& OutShadowInfo)
 {
 	//TODO : 디렉셔널 라이트가 여러 개 있으면, 우선순위(priority) 순으로 고르고,
 	// 우선순위가 같으면 에디터용 경고 메시지를 띄우며 하나만 골라 Intensity에 넣는다.
@@ -426,22 +426,66 @@ void FScene::UpdateDirectionalLight(FLightConstants& LightConstants, UDirectiona
 	LightConstants.DirectionalLight = DirectionalData;
 
 	{
-		// 테스트용 고정 영역. 장면의 위치와 크기에 맞게 조절한다.
-		const FVector Center(0.0f, 0.0f, 0.0f);
-		const float Width = 10.0f;
-		const float Height = 10.0f;
+		//// 테스트용 고정 영역. 장면의 위치와 크기에 맞게 조절한다.
+		//const FVector Center(0.0f, 0.0f, 0.0f);
+		//const float Width = 10.0f;
+		//const float Height = 10.0f;
+		//const float NearPlane = 0.1f;
+		//const float FarPlane = 200.0f;
+
+		// 카메라 프러스텀의 월드 꼭짓점 복원
+		FVector WorldCorners[8];
+		GetFrustumWorldCorners(CameraViewProjection, WorldCorners);
+
+		// 방향광의 회전만 적용한 좌표계 준비
+		// 아직 라이트 위치는 정하지 않고, 방향 기준으로만 변환한다.
+		const FMatrix LightRotation =
+			WorldTransform.Rotation.Quaternion().ToFMatrix();
+
+		const FMatrix InvLightRotation = LightRotation.GetTransposed();
+
+		// 라이트 방향 기준의 min/max 계산
+		const FVector4 FirstPoint =	FVector4(WorldCorners[0], 1.0f) * InvLightRotation;
+
+		FVector MinPoint(FirstPoint.X, FirstPoint.Y, FirstPoint.Z);
+		FVector MaxPoint = MinPoint;
+
+		for (int32 i = 1; i < 8; ++i)
+		{
+			const FVector4 Point =
+				FVector4(WorldCorners[i], 1.0f) * InvLightRotation;
+
+			MinPoint.X = std::min<float>(MinPoint.X, Point.X);
+			MinPoint.Y = std::min<float>(MinPoint.Y, Point.Y);
+			MinPoint.Z = std::min<float>(MinPoint.Z, Point.Z);
+
+			MaxPoint.X = std::max<float>(MaxPoint.X, Point.X);
+			MaxPoint.Y = std::max<float>(MaxPoint.Y, Point.Y);
+			MaxPoint.Z = std::max<float>(MaxPoint.Z, Point.Z);
+		}
+
+		// 장면 크기에 맞게 조절할 여유 거리
+		const float SidePadding = 0.5f;
+		const float DepthPadding = 50.0f;
+
+		const float FitWidth = std::max<float>(	MaxPoint.Y - MinPoint.Y + 2.0f * SidePadding, 0.001f);
+
+		const float FitHeight = std::max<float>(MaxPoint.Z - MinPoint.Z + 2.0f * SidePadding, 0.001f);
+
+		const float Width = FitWidth;
+		const float Height = FitHeight;
+
 		const float NearPlane = 0.1f;
-		const float FarPlane = 200.0f;
+		const float DepthRange = std::max<float>(MaxPoint.X - MinPoint.X + 2.0f * DepthPadding,	0.001f);
 
-		// 영역 중심이 깊이 범위의 가운데에 오도록 배치한다.
-		const float Distance = (NearPlane + FarPlane) * 0.5f;
-		const FVector LightPosition = Center - Direction * Distance;
+		const FVector LightPositionInRotatedSpace(MinPoint.X - DepthPadding - NearPlane, (MinPoint.Y + MaxPoint.Y) * 0.5f, (MinPoint.Z + MaxPoint.Z) * 0.5f);
 
-		const FMatrix RotationMatrix = WorldTransform.Rotation.Quaternion().ToFMatrix();
+		// 회전 좌표계에서 정한 라이트 위치를 월드 위치로 변환
+		const FVector4 LightPositionH =	FVector4(LightPositionInRotatedSpace, 1.0f) * LightRotation;
 
-		OutShadowInfo.LightView = FMatrix::MakeTranslation(-LightPosition) * RotationMatrix.GetTransposed();
+		const FVector LightPosition(LightPositionH.X, LightPositionH.Y,	LightPositionH.Z);
 
-		const float DepthRange = FarPlane - NearPlane;
+		OutShadowInfo.LightView = FMatrix::MakeTranslation(-LightPosition) * InvLightRotation;
 
 		OutShadowInfo.LightProjection = FMatrix(
 			0.0f, 0.0f, 1.0f / DepthRange, 0.0f,

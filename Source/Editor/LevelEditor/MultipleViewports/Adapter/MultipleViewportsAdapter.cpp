@@ -576,6 +576,38 @@ FMatrix FMultipleViewportsAdapter::GetEngineViewProjection(const int32 ViewIndex
     return PrepareView(ViewIndex).EngineViewProjection;
 }
 
+FMatrix FMultipleViewportsAdapter::GetShadowFitViewProjection(int32 ViewIndex, float PerspectiveShadowDistance, float OrthographicHalfDepth) const
+{
+    // PIE Override까지 반영된 카메라의 사본.
+   // 직교 렌더용 후퇴를 적용하기 전 위치를 사용한다.
+    FViewCamera Camera = GetEffectiveCamera(ViewIndex);
+
+    const FRect& Rect = ViewRects[ViewIndex];
+    const float AspectRatio = Rect.Width / Rect.Height;
+    const float NearClip = Camera.Projection.NearClip;
+
+    if (Camera.Projection.Mode == EProjectionMode::Perspective)
+    {
+        assert(PerspectiveShadowDistance > NearClip);
+
+        // 원근: 카메라 앞쪽의 제한된 거리까지 사용한다.
+        Camera.Projection.FarClip = std::min(Camera.Projection.FarClip, PerspectiveShadowDistance);
+    }
+    else
+    {
+        assert(OrthographicHalfDepth > 0.0f);
+
+        // 직교: 논리 카메라 위치를 중심으로 앞뒤 범위를 잡는다.
+        const FVector Forward =    NormalizedOrZero(CameraForward(Camera.Transform.Rotation));
+
+        Camera.Transform.Location =  Camera.Transform.Location - Forward * (OrthographicHalfDepth + NearClip);
+
+        Camera.Projection.FarClip =  NearClip + 2.0f * OrthographicHalfDepth;
+    }
+
+    return BuildViewMatrix(Camera.Transform) * BuildProjectionMatrix(Camera.Projection, AspectRatio);
+}
+
 // Native 카메라 위치를 엔진 FVector 그대로 반환한다.
 FVector FMultipleViewportsAdapter::GetEngineCameraLocation(const int32 ViewIndex) const
 {

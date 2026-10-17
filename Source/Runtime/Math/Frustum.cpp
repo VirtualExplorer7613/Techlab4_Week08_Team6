@@ -32,6 +32,39 @@ FFrustumPlanes ExtractFrustumPlanes(const FMatrix& Matrix)
     return Result;
 }
 
+void GetFrustumWorldCorners(const FMatrix& CameraViewProjection, FVector(&OutCorners)[8])
+{
+    const FMatrix InvViewProjection = CameraViewProjection.Inverse();
+
+    const FVector4 NdcCorners[8] =
+    {
+        // Near
+        FVector4(-1.0f, -1.0f, 0.0f, 1.0f),
+        FVector4(1.0f, -1.0f, 0.0f, 1.0f),
+        FVector4(-1.0f,  1.0f, 0.0f, 1.0f),
+        FVector4(1.0f,  1.0f, 0.0f, 1.0f),
+
+        // Far
+        FVector4(-1.0f, -1.0f, 1.0f, 1.0f),
+        FVector4(1.0f, -1.0f, 1.0f, 1.0f),
+        FVector4(-1.0f,  1.0f, 1.0f, 1.0f),
+        FVector4(1.0f,  1.0f, 1.0f, 1.0f)
+    };
+
+    for (int32 i = 0; i < 8; ++i)
+    {
+        const FVector4 WorldH = NdcCorners[i] * InvViewProjection;
+
+        assert(WorldH.W != 0.0f);
+
+        OutCorners[i] = FVector(
+            WorldH.X / WorldH.W,
+            WorldH.Y / WorldH.W,
+            WorldH.Z / WorldH.W
+        );
+    }
+}
+
 bool IsAABBInFrustum(const FAABB& Bounds, const FFrustumPlanes& Frustum)
 {
     FVectorRegister Boundreg = VectorSIMD::LoadFloat3(&Bounds.Extent.X);

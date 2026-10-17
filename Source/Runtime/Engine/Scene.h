@@ -40,7 +40,7 @@ public:
 	void MarkDirty(FPrimitiveSceneProxy* Proxy);
 	void MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy);
 
-	void UpdateLightComponents(FRenderer* Renderer);
+	void UpdateLightComponents(FRenderer* Renderer, const FMatrix& CameraViewProjection);
 	void RegisterLightComponent(ULightComponentBase* LightComponent);
 	void UnRegisterLightComponent(ULightComponentBase* LightComponent);
 
@@ -68,5 +68,5 @@ private:
 	void UpdatePointLight(FLightConstants& LightConstants, UPointLightComponent* LightComponent);
 	void UpdateSpotLight(FLightConstants& LightConstants, USpotLightComponent* LightComponent);
 	void UpdateAmbientLight(FLightConstants& LightConstants, UAmbientLightComponent* LightComponent);
-	void UpdateDirectionalLight(FLightConstants& LightConstants, UDirectionalLightComponent* LightComponent, FDirectionalShadowInfo& OutShadowInfo);
+	void UpdateDirectionalLight(FLightConstants& LightConstants, UDirectionalLightComponent* LightComponent, const FMatrix& CameraViewProjection, FDirectionalShadowInfo& OutShadowInfo);
 };

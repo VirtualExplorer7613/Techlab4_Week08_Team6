@@ -420,6 +420,20 @@ void UEditorEngine::RenderMultipleViewports()
 	UpdatePIEViewCamera();
 
 	UWorld* CapturedWorld = nullptr;
+
+	const auto RenderShadowForView = [&](UWorld& World, int32 ViewIndex)
+	{
+			// 장면 단위에 맞춰 조절할 초기값
+			constexpr float PerspectiveShadowDistance = 30.0f;
+			constexpr float OrthographicHalfDepth = 50.0f;
+
+			const FMatrix ShadowFitViewProjection =	MultipleViewportsAdapter.GetShadowFitViewProjection(ViewIndex,	PerspectiveShadowDistance, OrthographicHalfDepth);
+
+			World.GetScene().UpdateLightComponents(Renderer, ShadowFitViewProjection);
+
+			Renderer->GetShadowRenderer().Render(ShadowQueue);
+	};
+
 	for (int32 ViewIndex = 0; ViewIndex < 4; ++ViewIndex)
 	{
 		const bool bActive = MultipleViewportsAdapter.IsViewActive(ViewIndex);
@@ -431,18 +445,22 @@ void UEditorEngine::RenderMultipleViewports()
 		if (ViewWorld != CapturedWorld)
 		{
 			{
-				SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
-				MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
+				{
+					SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
+					MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
+				}
 				// FireBall 라이트 상수는 Renderer 공용 상태라 월드가 바뀌면 다시 올린다.
-				ViewWorld->GetScene().UpdateLightComponents(Renderer);
+				//ViewWorld->GetScene().UpdateLightComponents(Renderer);
 			}
 			// 카메라의 가시성 판정과 별도로 그림자 생성 물체를 수집한다.
 			ViewWorld->GatherShadowRenderPackets(ShadowQueue);
-
-			// 현재 World의 광원 시점에서 깊이를 기록한다.
-			Renderer->GetShadowRenderer().Render(ShadowQueue);
 			CapturedWorld = ViewWorld;
+			// 현재 World의 광원 시점에서 깊이를 기록한다.
+			//Renderer->GetShadowRenderer().Render(ShadowQueue);
+			//CapturedWorld = ViewWorld;
 		}
+		// 같은 World여도 카메라가 다르면 섀도 영역을 다시 계산한다.
+		RenderShadowForView(*ViewWorld, ViewIndex);
 
 		{
 			SCOPE_CYCLE_COUNTER(STAT_BuildRenderQueue);
@@ -471,16 +489,16 @@ void UEditorEngine::RenderMultipleViewports()
 			{
 				SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
 				MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
-				ViewWorld->GetScene().UpdateLightComponents(Renderer);
+				//ViewWorld->GetScene().UpdateLightComponents(Renderer);
 			}
 			// 카메라의 가시성 판정과 별도로 그림자 생성 물체를 수집한다.
 			ViewWorld->GatherShadowRenderPackets(ShadowQueue);
+			CapturedWorld = ViewWorld;
 
 			// 현재 World의 광원 시점에서 깊이를 기록한다.
-			Renderer->GetShadowRenderer().Render(ShadowQueue);
-
-			CapturedWorld = ViewWorld;
+			//Renderer->GetShadowRenderer().Render(ShadowQueue);
 		}
+		RenderShadowForView(*ViewWorld, PIEViewIndex);
 
 		{
 			SCOPE_CYCLE_COUNTER(STAT_BuildRenderQueue);
