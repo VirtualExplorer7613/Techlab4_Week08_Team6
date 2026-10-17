@@ -411,6 +411,50 @@ void UWorld::GatherRenderPackets(FRenderQueue& RenderQueue, const FLODViewContex
 	}
 }
 
+void UWorld::GatherShadowRenderPackets(FRenderQueue& OutQueue) const
+{
+	OutQueue.Reset();
+
+	constexpr uint8 ShadowLOD = 0;
+
+	for (const FPrimitiveSceneProxy* Proxy : Scene.Proxies)
+	{
+		if (!Proxy || !Proxy->IsVisible() || !Proxy->GetCastShadow())
+			continue;
+
+		UStaticMesh* Mesh = Proxy->GetMesh();
+
+		const FMeshRenderState* State = Proxy->GetRenderState();
+
+		if (!Mesh || !State || State->LODCount == 0)
+			continue;
+
+		const FCachedMeshLOD& LOD = State->LODs[ShadowLOD];
+
+		for (uint32 Index = 0; Index < LOD.NumSections; ++Index)
+		{
+			const FCachedMeshSection& Section = State->Sections[LOD.FirstSection + Index];
+
+			// 불투명 Section만 그림자
+			if (!Section.Material || Section.Material->BlendState != EBlendState::Opaque ||	Section.IndexCount == 0)
+			{
+				continue;
+			}
+
+			FRenderPacket& Packet = OutQueue.AddDefaulted_GetRef();
+
+			Packet.Proxy = Proxy;
+			Packet.Mesh = Mesh;
+			Packet.Material = Section.Material;
+			Packet.StartIndex = Section.StartIndex;
+			Packet.IndexCount = Section.IndexCount;
+			Packet.LODIndex = ShadowLOD;
+		}
+
+	}
+
+}
+
 //void UWorld::GatherRenderPackets(TArray<FRenderPacket>& RenderArray, const FLODViewContext* LODView, const FFrustumPlanes* Frustum)
 //{
 //	for (TObjectIterator<UPrimitiveComponent> Itr; Itr; ++Itr)

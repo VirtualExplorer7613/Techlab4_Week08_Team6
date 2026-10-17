@@ -58,6 +58,8 @@ public:
 
 	void GatherRenderPackets(FRenderQueue& RenderArray, const FLODViewContext* LODView = nullptr, const FFrustumPlanes* Frustum = nullptr, FRenderer* Renderer = nullptr);
 
+	void GatherShadowRenderPackets(FRenderQueue& OutQueue) const;
+
 	void CreateMainCamera();
 
 	// 카메라 Get/Set

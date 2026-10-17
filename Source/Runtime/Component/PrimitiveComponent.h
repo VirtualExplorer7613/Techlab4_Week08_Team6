@@ -28,12 +28,16 @@ class UPrimitiveComponent :public USceneComponent
 	// (빌보드는 단일 머티리얼, 스태틱 메시는 슬롯별 덮어쓰기) 각자 등록한다.
 	REFLECT_START(ClassName)
 		PROPERTY(bVisible)
+		PROPERTY(bCastShadow)
+		PROPERTY(bReceiveShadow)
 	REFLECT_END()
 public:
 	UPrimitiveComponent();
 	virtual ~UPrimitiveComponent();
 
 	virtual void BeginPlay() override;
+
+	virtual void PostEditChangeProperty(const FProperty& Property) override;
 
 	// Todo: subuv
 	//void SubmitToRenderQueue(TQueue<FRenderPacket>& RenderQueue);
@@ -59,6 +63,35 @@ public:
 		MarkRenderStateDirty();
 	}
 
+	bool GetCastShadow() const
+	{
+		return bCastShadow;
+	}
+
+	void SetCastShadow(bool bInCastShadow)
+	{
+		if (bCastShadow == bInCastShadow)
+			return;
+
+		bCastShadow = bInCastShadow;
+		MarkRenderStateDirty();
+	}
+
+	bool GetReceiveShadow() const
+	{
+		return bReceiveShadow;
+	}
+
+	void SetReceiveShadow(bool bInReceiveShadow)
+	{
+		if (bReceiveShadow == bInReceiveShadow)
+			return;
+
+		bReceiveShadow = bInReceiveShadow;
+		MarkRenderStateDirty();
+	}
+
+
 	virtual bool LineTraceComponent(const FRay& WorldRay, FHitResult& OutHit);
 	virtual bool LineTraceComponentLocal(const FRay& LocalRay, float& OutT);
 	virtual FBox CalcLocalBounds() const override
@@ -79,6 +112,8 @@ protected:
 	bool TraceMesh(const FRay& WorldRay, const FStaticMeshData& Mesh, const FMatrix& WorldMatrix, FHitResult& OutResult);
 	bool TraceMeshLocal(const FRay& LocalRay, const FStaticMeshData& Mesh, float& OutT);
 	bool bVisible = true;
+	bool bCastShadow = true;
+	bool bReceiveShadow = true;
 
 private:
 	friend class FScene;

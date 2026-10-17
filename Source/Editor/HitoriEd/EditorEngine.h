@@ -158,6 +158,7 @@ private:
 	FViewportsPanel* ViewportsPanel = nullptr;
 	FMultipleViewportsAdapter MultipleViewportsAdapter;
 	FRenderQueue RenderQueue;
+	FRenderQueue ShadowQueue;
 	FOutlinerPanel* OutlinerPanel = nullptr;
 	FContentDrawerPanel* ContentDrawerPanel = nullptr;
 

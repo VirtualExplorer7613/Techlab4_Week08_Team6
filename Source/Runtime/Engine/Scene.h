@@ -68,5 +68,5 @@ private:
 	void UpdatePointLight(FLightConstants& LightConstants, UPointLightComponent* LightComponent);
 	void UpdateSpotLight(FLightConstants& LightConstants, USpotLightComponent* LightComponent);
 	void UpdateAmbientLight(FLightConstants& LightConstants, UAmbientLightComponent* LightComponent);
-	void UpdateDirectionalLight(FLightConstants& LightConstants, UDirectionalLightComponent* LightComponent);
+	void UpdateDirectionalLight(FLightConstants& LightConstants, UDirectionalLightComponent* LightComponent, FDirectionalShadowInfo& OutShadowInfo);
 };

@@ -987,6 +987,44 @@ void FDetailsPanel::ExpandComponentPath(UActorComponent* Component)
 		ComponentsToExpand.Add(Parent);
 }
 
+void FDetailsPanel::DrawShadowDepthMap()
+{
+	if (!ImGui::CollapsingHeader("Shadow Depth Map", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		return;
+	}
+
+	FTexture2D* ShadowMap =	ShadowMapQuery ? ShadowMapQuery() : nullptr;
+
+	if (!ShadowMap || !ShadowMap->GetSRV())
+	{
+		ImGui::TextDisabled("Shadow map unavailable.");
+		return;
+	}
+
+	const uint32 MapWidth = ShadowMap->GetWidth();
+	const uint32 MapHeight = ShadowMap->GetHeight();
+
+	if (MapWidth == 0 || MapHeight == 0)
+	{
+		return;
+	}
+
+	ImGui::Text("Resolution: %u x %u", MapWidth, MapHeight);
+
+	// 패널 너비에 맞추고, 텍스처의 가로세로 비율을 유지한다.
+	const float PreviewWidth = ImGui::GetContentRegionAvail().x;
+
+	if (PreviewWidth <= 0.0f)
+	{
+		return;
+	}
+
+	const float PreviewHeight =	PreviewWidth * static_cast<float>(MapHeight) / static_cast<float>(MapWidth);
+
+	ImGui::Image((ImTextureID)ShadowMap->GetSRV(), ImVec2(PreviewWidth, PreviewHeight));
+}
+
 
 void FDetailsPanel::OnRender()
 {
@@ -1038,6 +1076,12 @@ void FDetailsPanel::OnRender()
 			ImGui::PushID(TargetComponent);
 			ImGui::SeparatorText("Component Properties");
 			DrawProperties(TargetComponent, CustomFont);
+
+			// Directional Light 컴포넌트를 선택했을 때 미리보기 표시.
+			if (Cast<UDirectionalLightComponent>(TargetComponent))
+			{
+				DrawShadowDepthMap();
+			}
 
 			if(SelectCandidateComponent != TargetComponent)
 			{

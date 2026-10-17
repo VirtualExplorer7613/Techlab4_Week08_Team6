@@ -8,6 +8,7 @@
 #include "Render/ViewMode.h"
 #include "Occlusion/GPUOcclusion.h"
 #include "TileBasedCulling/TileBasedCulling.h"
+#include "ShadowRenderer.h"
 #include "Shared/LightDefinitions.h"
 
 constexpr uint32 ObjectSlotBytes = 256;
@@ -166,6 +167,10 @@ public:
 	uint32 GetPointLightCount() const { return LightData.PointLightCount; }
 	uint32 GetSpotLightCount() const { return LightData.SpotLightCount; }
 	
+	FShadowRenderer& GetShadowRenderer()
+	{
+		return ShadowRenderer;
+	}
 
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
@@ -190,6 +195,7 @@ private:
 
 	FGPUOcclusion GPUOcclusion;
 	FTileBasedCulling TileBasedCulling;
+	FShadowRenderer ShadowRenderer;
 
 	// 라이트 cbuffer(b3)와 로컬 라이트 StructuredBuffer(t8, t9)를 VS·PS에 꽂는다.
 	void BindLightResources();

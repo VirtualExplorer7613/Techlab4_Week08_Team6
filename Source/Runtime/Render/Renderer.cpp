@@ -106,6 +106,10 @@ bool FRenderer::Init()
 	}
 	GPUOcclusion.Init();   // 실패해도 오클루전만 못 쓸 뿐 렌더링은 된다
 	TileBasedCulling.Init();
+	if (!ShadowRenderer.Init())
+	{
+		HTR_LOG(Warning, "[Renderer] Shadow resource initialization failed.");
+	}
 
 	return true;
 }

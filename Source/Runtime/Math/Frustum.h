@@ -8,6 +8,7 @@ struct FAABB { FVector Center; FVector Extent; };
 
 static FPlane NormalizePlane(const FPlane Plane);
 FFrustumPlanes ExtractFrustumPlanes(const FMatrix& Matrix);
+void GetFrustumWorldCorners(const FMatrix& CameraViewProjection, FVector(&OutCorners)[8]);
 bool IsAABBInFrustum(const FAABB& Bounds, const FFrustumPlanes& Frustum);
 FAABB MakeWorldBounds(const FBox& Value);
 

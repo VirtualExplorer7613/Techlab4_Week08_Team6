@@ -35,6 +35,8 @@ public:
 
 	ImFont* GetCustomFont() { return CustomFont; }
 
+	void SetShadowMapQuery(std::function<FTexture2D* ()> InQuery) {ShadowMapQuery = std::move(InQuery);}
+
 private:
 	void DrawSceneComponentNode(USceneComponent* Component, USceneComponent* Root, UActorComponent*& OutSelectedComponent);
 	void TryReparent(USceneComponent* DroppedComponent, USceneComponent* DragComponent);
@@ -57,5 +59,8 @@ private:
 	USceneComponent* PendingDroppedComponent = nullptr;
 	USceneComponent* PendingDragComponent = nullptr;
 	TArray<USceneComponent*> ComponentsToExpand;
+
+	void DrawShadowDepthMap();
+	std::function<FTexture2D* ()> ShadowMapQuery;
 };
 

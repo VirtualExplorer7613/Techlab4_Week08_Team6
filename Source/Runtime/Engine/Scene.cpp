@@ -6,6 +6,7 @@
 #include "Component/AmbientLightComponent.h"
 #include "Component/BillboardComponent.h"
 #include "Shared/LightDefinitions.h"
+#include "Render/ShadowInfo.h"
 
 void FScene::AddPrimitive(UPrimitiveComponent* Component)
 {
@@ -218,6 +219,7 @@ void FScene::UpdateLightComponents(FRenderer* Renderer)
 		return;
 
 	FLightConstants Constants{};
+	FDirectionalShadowInfo ShadowInfo{};
 	for (ULightComponentBase* LightComponent : LightComponents)
 	{
 		if (!LightComponent)
@@ -262,11 +264,12 @@ void FScene::UpdateLightComponents(FRenderer* Renderer)
 
 		else if (UDirectionalLightComponent* DirectionalLightComponent = Cast<UDirectionalLightComponent>(LightComponent))
 		{
-			UpdateDirectionalLight(Constants, DirectionalLightComponent);
+			UpdateDirectionalLight(Constants, DirectionalLightComponent, ShadowInfo);
 		}
 	}
 
 	Renderer->SetLight(Constants);
+	Renderer->GetShadowRenderer().SetDirectionalShadowInfo(ShadowInfo);
 }
 
 void FScene::RegisterLightComponent(ULightComponentBase* LightComponent)
@@ -396,7 +399,7 @@ void FScene::UpdateAmbientLight(FLightConstants & LightConstants, UAmbientLightC
 	LightConstants.AmbientLight = AmbientData;
 }
 
-void FScene::UpdateDirectionalLight(FLightConstants & LightConstants, UDirectionalLightComponent* LightComponent)
+void FScene::UpdateDirectionalLight(FLightConstants& LightConstants, UDirectionalLightComponent* LightComponent, FDirectionalShadowInfo& OutShadowInfo)
 {
 	//TODO : 디렉셔널 라이트가 여러 개 있으면, 우선순위(priority) 순으로 고르고,
 	// 우선순위가 같으면 에디터용 경고 메시지를 띄우며 하나만 골라 Intensity에 넣는다.
@@ -421,4 +424,34 @@ void FScene::UpdateDirectionalLight(FLightConstants & LightConstants, UDirection
 
 	//TODO : 우선순위 도입하기
 	LightConstants.DirectionalLight = DirectionalData;
+
+	{
+		// 테스트용 고정 영역. 장면의 위치와 크기에 맞게 조절한다.
+		const FVector Center(0.0f, 0.0f, 0.0f);
+		const float Width = 10.0f;
+		const float Height = 10.0f;
+		const float NearPlane = 0.1f;
+		const float FarPlane = 200.0f;
+
+		// 영역 중심이 깊이 범위의 가운데에 오도록 배치한다.
+		const float Distance = (NearPlane + FarPlane) * 0.5f;
+		const FVector LightPosition = Center - Direction * Distance;
+
+		const FMatrix RotationMatrix = WorldTransform.Rotation.Quaternion().ToFMatrix();
+
+		OutShadowInfo.LightView = FMatrix::MakeTranslation(-LightPosition) * RotationMatrix.GetTransposed();
+
+		const float DepthRange = FarPlane - NearPlane;
+
+		OutShadowInfo.LightProjection = FMatrix(
+			0.0f, 0.0f, 1.0f / DepthRange, 0.0f,
+			2.0f / Width, 0.0f, 0.0f, 0.0f,
+			0.0f, 2.0f / Height, 0.0f, 0.0f,
+			0.0f, 0.0f, -NearPlane / DepthRange, 1.0f
+		);
+
+		OutShadowInfo.LightViewProjection =	OutShadowInfo.LightView * OutShadowInfo.LightProjection;
+
+ 		OutShadowInfo.bEnabled = true;
+	}
 }

@@ -212,6 +212,19 @@ bool UEditorEngine::Init()
 			DeleteComponent(Component);
 		}
 	);
+	// Details에서 현재 Shadow Map을 조회하는 콜백
+	DetailsPanel->SetShadowMapQuery(
+		[this]() -> FTexture2D*
+		{
+			if (!Renderer)
+			{
+				return nullptr;
+			}
+
+			return Renderer->GetShadowRenderer().GetShadowMap();
+		}
+	);
+
 
 	LineBatcher = MakeUnique<FLineBatcher>();
 	LineBatcher->Init(Renderer, GetActiveWorld());
@@ -417,10 +430,17 @@ void UEditorEngine::RenderMultipleViewports()
 		UWorld* ViewWorld = GetWorldForView(ViewIndex);
 		if (ViewWorld != CapturedWorld)
 		{
-			SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
-			MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
-			// FireBall 라이트 상수는 Renderer 공용 상태라 월드가 바뀌면 다시 올린다.
-			ViewWorld->GetScene().UpdateLightComponents(Renderer);
+			{
+				SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
+				MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
+				// FireBall 라이트 상수는 Renderer 공용 상태라 월드가 바뀌면 다시 올린다.
+				ViewWorld->GetScene().UpdateLightComponents(Renderer);
+			}
+			// 카메라의 가시성 판정과 별도로 그림자 생성 물체를 수집한다.
+			ViewWorld->GatherShadowRenderPackets(ShadowQueue);
+
+			// 현재 World의 광원 시점에서 깊이를 기록한다.
+			Renderer->GetShadowRenderer().Render(ShadowQueue);
 			CapturedWorld = ViewWorld;
 		}
 
@@ -448,9 +468,17 @@ void UEditorEngine::RenderMultipleViewports()
 		UWorld* ViewWorld = GetWorldForView(PIEViewIndex);
 		if (ViewWorld != CapturedWorld)
 		{
-			SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
-			MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
-			ViewWorld->GetScene().UpdateLightComponents(Renderer);
+			{
+				SCOPE_CYCLE_COUNTER(STAT_CaptureWorld);
+				MultipleViewportsAdapter.CaptureWorld(*ViewWorld);
+				ViewWorld->GetScene().UpdateLightComponents(Renderer);
+			}
+			// 카메라의 가시성 판정과 별도로 그림자 생성 물체를 수집한다.
+			ViewWorld->GatherShadowRenderPackets(ShadowQueue);
+
+			// 현재 World의 광원 시점에서 깊이를 기록한다.
+			Renderer->GetShadowRenderer().Render(ShadowQueue);
+
 			CapturedWorld = ViewWorld;
 		}
 
