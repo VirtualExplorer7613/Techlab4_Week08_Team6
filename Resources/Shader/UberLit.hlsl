@@ -215,7 +215,7 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal)
     shadowPos.y = -shadowPos.y * 0.5f + 0.5f;
     
     // 뷰포트 밖이면 그림자 없음
-    if (shadowPos.x < 0.0f || shadowPos.x > 1.0f || shadowPos.y < 0.0f || shadowPos.y > 1.0f)
+    if (shadowPos.x < 0.0f || shadowPos.x > 1.0f || shadowPos.y < 0.0f || shadowPos.y > 1.0f || shadowPos.z < 0.0f || shadowPos.z > 1.0f)
     {
         return 1.0f;
     }

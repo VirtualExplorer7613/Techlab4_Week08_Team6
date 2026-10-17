@@ -1,6 +1,8 @@
 #include "EnginePCH.h"
 #include "ShadowRenderer.h"
+
 #include "Math/Frustum.h"
+#include "Render/RenderCommand.h"
 
 FMatrix FShadowRenderer::BuildDirectionalLightView(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection) const
 {
@@ -101,4 +103,56 @@ std::array<FVector, 8> FShadowRenderer::LimitFrustumToShadowDistance(const std::
     }
 
     return Result;
+}
+
+bool FShadowRenderer::Init(uint32 ShadowMapSize)
+{
+    D3D11_TEXTURE2D_DESC Desc{};
+    Desc.Width = ShadowMapSize;
+    Desc.Height = ShadowMapSize;
+    Desc.MipLevels = 1;
+    Desc.ArraySize = 1;
+    Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+    Desc.SampleDesc.Count = 1;
+    Desc.Usage = D3D11_USAGE_DEFAULT;
+    Desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+
+    ShadowMap = RenderCommand::CreateTexture2D(Desc);
+
+    if (!ShadowMap || !ShadowMap->GetRawPtr() || !ShadowMap->GetDSV() || !ShadowMap->GetSRV())
+    {
+        ShadowMap.reset();
+        return false;
+    }
+
+    return true;
+}
+
+bool FShadowRenderer::BeginShadowPass(const FShadowPassDesc &Desc)
+{
+    if (!Desc.DepthView || Desc.Width == 0 || Desc.Height == 0)
+        return false;
+
+    RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+
+    ID3D11DeviceContext *Context = RenderCommand::GetContext();
+
+    // 컬러 타깃 없이 DepthView만 렌더링 대상으로 설정
+    Context->OMSetRenderTargets(0, nullptr, Desc.DepthView);
+
+    // Shadow Map 크기에 맞춰 렌더링 영역 설정
+    RenderCommand::SetViewport(0, 0, Desc.Width, Desc.Height);
+
+    // 그림자 깊이 렌더링에 필요한 GPU 상태 설정
+    RenderCommand::SetRasterizerState(ERasterizerState::ShadowDepth);
+    RenderCommand::SetDepthStencilState(EDepthStencilState::Default);
+    RenderCommand::SetBlendState(EBlendState::NoColorWrite);
+
+    return true;
+}
+
+void FShadowRenderer::EndShadowPass()
+{
+    // Shadow DSV 바인딩 해제
+    RenderCommand::GetContext()->OMSetRenderTargets(0, nullptr, nullptr);
 }

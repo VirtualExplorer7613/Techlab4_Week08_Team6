@@ -9,6 +9,7 @@
 #include "Occlusion/GPUOcclusion.h"
 #include "TileBasedCulling/TileBasedCulling.h"
 #include "Shared/LightDefinitions.h"
+#include "Shadow/ShadowRenderer.h"
 
 constexpr uint32 ObjectSlotBytes = 256;
 
@@ -34,6 +35,7 @@ struct FSortEntry
 };
 
 class UCameraComponent;
+class FScene;
 
 // 오클루전 컬링의 효과 상한을 재기 위한 측정 결과 (디버그 전용)
 struct FOcclusionMeasureResult
@@ -147,7 +149,8 @@ public:
 
 	void SetLight(const FLightConstants& LightData);
 
-    void RenderDirectionalShadowMap(const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+    bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc &Desc, const FMatrix &LightVP, EViewMode ViewMode);
+    void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
 
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
 	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World)
@@ -190,13 +193,15 @@ public:
 	uint32 GetPointLightCount() const { return LightData.PointLightCount; }
 	uint32 GetSpotLightCount() const { return LightData.SpotLightCount; }
 
-    ID3D11ShaderResourceView *GetDirectionalShadowMapSRV() const
-    {
-        return DirectionalShadowMap ? DirectionalShadowMap->GetSRV() : nullptr;
-    }
     FTexture2D *GetDirectionalShadowMap() const
     {
-        return DirectionalShadowMap.get();
+        return ShadowRenderer ? ShadowRenderer->GetShadowMap() : nullptr;
+    }
+
+    ID3D11ShaderResourceView *GetDirectionalShadowMapSRV() const
+    {
+        FTexture2D *ShadowMap = GetDirectionalShadowMap();
+        return ShadowMap ? ShadowMap->GetSRV() : nullptr;
     }
 
 private:
@@ -249,7 +254,9 @@ private:
 	ComPtr<ID3D11Buffer> SpotLightBuffer;
 	ComPtr<ID3D11ShaderResourceView> SpotLightSRV;
 
-    TUniquePtr<FTexture2D> DirectionalShadowMap;
+    TUniquePtr<FShadowRenderer> ShadowRenderer;
+
+    void DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, EViewMode ViewMode);
 
 	//DepthPrepass 시 잠깐 켜짐, 머테리얼 바인딩을 건너뜀
 	bool bDepthOnly = false;
