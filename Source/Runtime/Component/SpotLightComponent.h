@@ -15,7 +15,7 @@ class USpotLightComponent : public UPointLightComponent
 	REFLECT_END()
 
 public:
-	USpotLightComponent() = default;
+	USpotLightComponent();
 	virtual ~USpotLightComponent() override = default;
 
 	void DrawDebug(FLineBatcher* LineBatcher) const;

@@ -101,17 +101,18 @@ bool FRenderer::Init()
 	ViewCB = RenderCommand::CreateConstantBuffer(sizeof(FViewConstants));
 	LightCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGlobalConstants));
 
-    D3D11_TEXTURE2D_DESC DirectionalShadowMapDesc{};
-    DirectionalShadowMapDesc.Width = 2048;
-    DirectionalShadowMapDesc.Height = 2048;
-    DirectionalShadowMapDesc.MipLevels = 1;
-    DirectionalShadowMapDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
-    DirectionalShadowMapDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
-    DirectionalShadowMapDesc.ArraySize = 1;
-    DirectionalShadowMapDesc.SampleDesc.Count = 1;
-    DirectionalShadowMapDesc.SampleDesc.Quality = 0;
+    D3D11_TEXTURE2D_DESC ShadowMapDesc{};
+    ShadowMapDesc.Width = 2048;
+    ShadowMapDesc.Height = 2048;
+    ShadowMapDesc.MipLevels = 1;
+    ShadowMapDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+    ShadowMapDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+    ShadowMapDesc.ArraySize = 1;
+    ShadowMapDesc.SampleDesc.Count = 1;
+    ShadowMapDesc.SampleDesc.Quality = 0;
 
-	DirectionalShadowMap = RenderCommand::CreateTexture2D(DirectionalShadowMapDesc);
+	DirectionalShadowMap = RenderCommand::CreateTexture2D(ShadowMapDesc);
+    SpotShadowMap = RenderCommand::CreateTexture2D(ShadowMapDesc);
 
 	if (!CreateDynamicStructuredBuffer(sizeof(FPointLight), NUM_POINT_LIGHT, PointLightBuffer, PointLightSRV) || !CreateDynamicStructuredBuffer(sizeof(FSpotLight), NUM_SPOT_LIGHT, SpotLightBuffer, SpotLightSRV))
 	{
@@ -212,8 +213,9 @@ void FRenderer::BindLightResources()
 	Context->VSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 	Context->PSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 
-    RenderCommand::BindShaderResource(10, DirectionalShadowMap.get(), EShaderBindFlagBits::Pixel);
-    RenderCommand::BindSamplerState(1, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel);
+    RenderCommand::BindShaderResource(10, DirectionalShadowMap.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindShaderResource(11, SpotShadowMap.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindSamplerState(1, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 }
 
 void FRenderer::RenderOpaque(const FMatrix& ViewProjection, const EViewMode ViewMode, bool bDepthPrepassed)
@@ -718,6 +720,57 @@ void FRenderer::SetLight(const FLightConstants& InLightData)
 	RenderCommand::UpdateBufferData(LightCB.get(), &Globals, sizeof(FLightGlobalConstants));
 	UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight) * LightData.PointLightCount);
 	UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
+}
+
+void FRenderer::RenderSpotShadowMap(const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
+{
+    if (LightData.SpotLights[0].ShadowParameters.W <= 0.0f)
+    {
+        return;
+    }
+
+    // SRV Unbinding
+    RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel);
+
+    const FMatrix &LightVP = LightData.SpotLights[0].ViewProjection;
+
+    // Set up the rendering info for the shadow pass
+    FRenderingInfo ShadowPassInfo;
+    ShadowPassInfo.ViewportSetting = {0, 0, 2048, 2048, 0.0f, 1.0f};
+    ShadowPassInfo.ColorRenderTargets.Reset();
+    ShadowPassInfo.DepthStencil.Texture = SpotShadowMap.get();
+    ShadowPassInfo.DepthStencil.LoadOp = ERenderTargetLoadOp::Clear;
+    ShadowPassInfo.DepthStencil.ClearValue.DepthClearValue = 1.0f;
+
+    // Change the rasterizer, depth-stencil, and blend states for shadow rendering
+    ERasterizerState RasterizerState = ERasterizerState::SolidBack;
+    EDepthStencilState DepthStencilState = EDepthStencilState::Default;
+    EBlendState BlendState = EBlendState::NoColorWrite;
+
+    RenderCommand::BeginRenderPass(ShadowPassInfo);
+
+    RenderCommand::SetRasterizerState(RasterizerState);
+    RenderCommand::SetDepthStencilState(DepthStencilState);
+    RenderCommand::SetBlendState(BlendState);
+
+    FViewConstants ViewConstants;
+    ViewConstants.VP = LightVP;
+    RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
+
+    bDepthOnly = true;
+    bShadowMapPass = true;
+
+    DrawStaticGroups(ViewMode);
+    DrawPackets(0, FirstTranslucentIndex, LightVP, ViewMode);
+
+    bDepthOnly = false;
+    bShadowMapPass = false;
+
+    RenderCommand::EndRenderPass(ShadowPassInfo);
+
+    ViewConstants.VP = CameraViewProjection;
+    ViewConstants.CameraPosition = CameraLocation;
+    RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
 }
 
 void FRenderer::RenderDirectionalShadowMap(const FMatrix &CameraViewProjection, const FVector &CameraLocation , const EViewMode ViewMode)

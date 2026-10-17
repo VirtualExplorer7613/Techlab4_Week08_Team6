@@ -21,6 +21,8 @@ ADirectionalLight::ADirectionalLight()
 	StaticMeshComponent->SetStaticMesh(UAssetManager::GetAssetByPath<UStaticMesh>("Arrow"));
 	StaticMeshComponent->SetRelativeRotation(FRotator(90.0f, 0.0f, 0.0f));
 	StaticMeshComponent->SetWorldScale3D(FVector(0.5f));
+    StaticMeshComponent->SetCastShadows(false);
+    StaticMeshComponent->SetReceiveShadows(false);
 
 
 	UMaterial* Material = UAssetManager::GetAssetByPath<UMaterial>("DirectionalLightIconMaterial");

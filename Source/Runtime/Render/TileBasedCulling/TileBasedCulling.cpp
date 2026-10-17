@@ -30,6 +30,8 @@ struct FSpotLightInfo
     float4 FalloffEnabled;
     float4 OutAngleInvCosDiff;
     float4 FowardVector;
+    matrix ViewProjection;
+    float4 ShadowParameters;
 };
 
 //Tile Culling에 필요한 상수 버퍼
