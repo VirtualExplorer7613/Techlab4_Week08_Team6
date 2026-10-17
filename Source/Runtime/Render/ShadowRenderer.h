@@ -31,6 +31,8 @@ public:
 	void SetDirectionalShadowInfo(const FDirectionalShadowInfo& Info)
 	{
 		DirectionalShadowInfo = Info;
+		// 새 광원 / 뷰의 정보가 들어왔으므로 다시 렌더해야 한다.
+		bShadowMapReady = false;
 	}
 
 	const FDirectionalShadowInfo& GetDirectionalShadowInfo() const
@@ -39,11 +41,14 @@ public:
 	}
 
 	void Render(const FRenderQueue& ShadowPackets);
+	void BindForLighting();
 
 private:
 	TUniquePtr<FTexture2D> ShadowMap;
 	TUniquePtr<FConstantBuffer> ShadowCB;
 	TUniquePtr<FConstantBuffer> ShadowObjectCB;
 	FDirectionalShadowInfo DirectionalShadowInfo{};
+
+	bool bShadowMapReady = false;
 
 };

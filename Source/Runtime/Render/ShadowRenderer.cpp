@@ -54,6 +54,8 @@ bool FShadowRenderer::Init(uint32 Resolution)
 
 void FShadowRenderer::Render(const FRenderQueue& ShadowPackets)
 {
+	bShadowMapReady = false;
+
 	if (!ShadowMap || !ShadowMap->GetDSV() || !ShadowCB || !ShadowCB->GetBuffer() || !ShadowObjectCB || !ShadowObjectCB->GetBuffer())
 	{
 		return;
@@ -72,6 +74,9 @@ void FShadowRenderer::Render(const FRenderQueue& ShadowPackets)
 	// 이전 SRV를 해제한다.
 	RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel);
 
+	// 본 렌더링 패스에서 사용했던 슬롯.
+	RenderCommand::UnbindShaderResource(4, EShaderBindFlagBits::Pixel);
+
 	// Shadow Map의 깊이만 기록한다.
 	FRenderingInfo PassInfo{};
 	PassInfo.ViewportSetting.Width = ShadowMap->GetWidth();
@@ -87,6 +92,7 @@ void FShadowRenderer::Render(const FRenderQueue& ShadowPackets)
 	if (!DirectionalShadowInfo.bEnabled)
 	{
 		RenderCommand::EndRenderPass(PassInfo);
+		//bShadowMapReady = true;
 		return;
 	}
 
@@ -149,4 +155,53 @@ void FShadowRenderer::Render(const FRenderQueue& ShadowPackets)
 
 	// UI나 다음 패스에서 SRV로 읽을 수 있도록 DSV 연결 해제.
 	RenderCommand::EndRenderPass(PassInfo);
+	bShadowMapReady = true;
+}
+
+void FShadowRenderer::BindForLighting()
+{
+	// 상수 버퍼가 없으면 이전 바인딩을 비우고 종료한다.
+	if (!ShadowCB || !ShadowCB->GetBuffer())
+	{
+		ID3D11DeviceContext* Context = RenderCommand::GetContext();
+
+		ID3D11Buffer* NullCB = nullptr;
+		Context->PSSetConstantBuffers(5, 1, &NullCB);
+
+		RenderCommand::UnbindShaderResource(4, EShaderBindFlagBits::Pixel);
+
+		ID3D11SamplerState* NullSampler = nullptr;
+		Context->PSSetSamplers(1, 1, &NullSampler);
+
+		return;
+	}
+
+	const bool bCanUseShadow =	bShadowMapReady && DirectionalShadowInfo.bEnabled && ShadowMap && ShadowMap->GetSRV();
+
+	FShadowConstants Constants{};
+	Constants.LightViewProjection =	DirectionalShadowInfo.LightViewProjection;
+	Constants.DepthBias = DirectionalShadowInfo.DepthBias;
+	Constants.bEnabled = bCanUseShadow ? 1u : 0u;
+
+	if (bCanUseShadow)
+	{
+		Constants.InvShadowMapSize = FVector2(1.0f / static_cast<float>(ShadowMap->GetWidth()),	1.0f / static_cast<float>(ShadowMap->GetHeight()));
+	}
+
+	// 비활성 상태도 업로드하여 이전 프레임의 값이 남지 않게 한다.
+	RenderCommand::UpdateBufferData(ShadowCB.get(), &Constants);
+
+	RenderCommand::BindConstantBuffer(5, ShadowCB.get(), EShaderBindFlagBits::Pixel);
+
+	if (!bCanUseShadow)
+	{
+		RenderCommand::UnbindShaderResource(4, EShaderBindFlagBits::Pixel);
+
+		return;
+	}
+
+	RenderCommand::BindShaderResource(4, ShadowMap.get(), EShaderBindFlagBits::Pixel);
+
+	RenderCommand::BindSamplerState(1, ESamplerState::ShadowComparison,EShaderBindFlagBits::Pixel);
+
 }

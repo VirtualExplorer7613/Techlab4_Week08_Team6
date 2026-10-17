@@ -95,6 +95,19 @@ cbuffer TileBasedCullingConstants : register(b4)
 StructuredBuffer<uint2> TileHeader : register(t1);
 StructuredBuffer<uint> TileLightIndices : register(t2);
 
+cbuffer ShadowConstants : register(b5)
+{
+    matrix LightViewProjection;
+
+    float2 InvShadowMapSize;
+    float DepthBias;
+    uint bEnabled;
+};
+
+Texture2D<float> g_txShadow : register(t4);
+SamplerComparisonState g_ShadowSampler : register(s1);
+
+
 // ACES Filmic Tone Mapping
 float3 ACESFilmicToneMapping(float3 color)
 {
@@ -196,14 +209,67 @@ float3 CalculateAmbientLight(FAmbientLightInfo info)
     return info.ColorIntensity.xyz * info.ColorIntensity.w;
 }
 
-FLightResult CalculateDirectionalLight(FDirectionalLightInfo info, float3 normal, float3 viewDir)
+float CalculateDirectionalShadowVisibility(float3 worldPos)
+{
+#if LIGHTING_MODEL_GOURAUD
+    // 현재 그림자 리소스는 PS에 연결되어 있다.
+    // Gouraud의 VS 조명 계산에서는 그림자를 적용하지 않는다.
+    return 1.0f;
+#else
+    if (bEnabled == 0)
+    {
+        return 1.0f;
+    }
+
+    // World => Light Clip
+    float4 lightClip = mul(float4(worldPos, 1.0f), LightViewProjection);
+    
+    if (lightClip.w <= 0.000001f)
+    {
+        return 1.0f;
+    }
+
+    // Light Clip => Light NDC
+    float3 lightNDC = lightClip.xyz / lightClip.w;
+
+    // 깊이 범위 밖은 그림자 적용 범위에서 제외한다.
+    if (lightNDC.z < 0.0f || lightNDC.z > 1.0f)
+    {
+        return 1.0f;
+    }
+
+    // NDC XY [-1, 1] => Texture UV [0, 1]
+    float2 shadowUV = float2(lightNDC.x * 0.5f + 0.5f, -lightNDC.y * 0.5f + 0.5f);
+
+    if (any(shadowUV < 0.0f) || any(shadowUV > 1.0f))
+    {
+        return 1.0f;
+    }
+
+    float compareDepth = saturate(lightNDC.z - max(DepthBias, 0.0f));
+
+    return g_txShadow.SampleCmpLevelZero(g_ShadowSampler, shadowUV, compareDepth);
+#endif
+}
+
+FLightResult CalculateDirectionalLight(FDirectionalLightInfo info, float3 worldPos, float3 normal, float3 viewDir)
 {
     // Direction은 빛이 나아가는 방향이므로 뒤집어야 표면→라이트 방향이 된다.
     float3 lightDir = normalize(-info.Direction.xyz);
     float3 radiance = info.ColorIntensity.xyz * info.ColorIntensity.w;
 
-    return BlinnPhong(normal, lightDir, viewDir, radiance);
+    FLightResult result = BlinnPhong(normal, lightDir, viewDir, radiance);
+
+    float visibility = CalculateDirectionalShadowVisibility(worldPos);
+
+    result.Diffuse *= visibility;
+    result.Specular *= visibility;
+
+    return result;
 }
+
+
+
 
 FLightResult CalculateLightingTiled(float2 PixelPos, float3 worldPos, float3 normal, float3 viewDir)
 {
@@ -231,7 +297,7 @@ FLightResult CalculateLightingTiled(float2 PixelPos, float3 worldPos, float3 nor
         Total.Diffuse += Light.Diffuse;
         Total.Specular += Light.Specular;
     }
-    FLightResult Directional = CalculateDirectionalLight(DirectionalLight, normal, viewDir);
+    FLightResult Directional = CalculateDirectionalLight(DirectionalLight, worldPos, normal, viewDir);
     Total.Diffuse += Directional.Diffuse;
     Total.Specular += Directional.Specular;
     return Total;
@@ -261,7 +327,7 @@ FLightResult CalculateLighting(float3 worldPos, float3 normal, float3 viewDir)
     }
 
     //Directional Light
-    FLightResult Directional = CalculateDirectionalLight(DirectionalLight, normal, viewDir);
+    FLightResult Directional = CalculateDirectionalLight(DirectionalLight, worldPos, normal, viewDir);
     Total.Diffuse += Directional.Diffuse;
     Total.Specular += Directional.Specular;
 

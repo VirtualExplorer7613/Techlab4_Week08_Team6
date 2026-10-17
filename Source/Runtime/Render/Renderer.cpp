@@ -202,6 +202,8 @@ void FRenderer::BindLightResources()
 	ID3D11DeviceContext* Context = RenderCommand::GetContext();
 	Context->VSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 	Context->PSSetShaderResources(LightSRVSlot, 2, LightSRVs);
+
+	ShadowRenderer.BindForLighting();
 }
 
 void FRenderer::RenderOpaque(const FMatrix& ViewProjection, const EViewMode ViewMode, bool bDepthPrepassed)

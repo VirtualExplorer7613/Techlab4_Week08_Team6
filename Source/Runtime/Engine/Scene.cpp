@@ -495,6 +495,7 @@ void FScene::UpdateDirectionalLight(FLightConstants& LightConstants, UDirectiona
 		);
 
 		OutShadowInfo.LightViewProjection =	OutShadowInfo.LightView * OutShadowInfo.LightProjection;
+		OutShadowInfo.DepthBias = 0.005f;
 
  		OutShadowInfo.bEnabled = true;
 	}
