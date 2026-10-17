@@ -715,58 +715,7 @@ void FRenderer::SetLight(const FLightConstants& InLightData)
 	UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
 }
 
-void FRenderer::RenderSpotShadowMap(const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
-{
-    if (LightData.SpotLights[0].ShadowParameters.W <= 0.0f)
-    {
-        return;
-    }
-
-    // SRV Unbinding
-    RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel);
-
-    const FMatrix &LightVP = LightData.SpotLights[0].ViewProjection;
-
-    // Set up the rendering info for the shadow pass
-    FRenderingInfo ShadowPassInfo;
-    ShadowPassInfo.ViewportSetting = {0, 0, 2048, 2048, 0.0f, 1.0f};
-    ShadowPassInfo.ColorRenderTargets.Reset();
-    ShadowPassInfo.DepthStencil.Texture = SpotShadowMap.get();
-    ShadowPassInfo.DepthStencil.LoadOp = ERenderTargetLoadOp::Clear;
-    ShadowPassInfo.DepthStencil.ClearValue.DepthClearValue = 1.0f;
-
-    // Change the rasterizer, depth-stencil, and blend states for shadow rendering
-    ERasterizerState RasterizerState = ERasterizerState::SolidBack;
-    EDepthStencilState DepthStencilState = EDepthStencilState::Default;
-    EBlendState BlendState = EBlendState::NoColorWrite;
-
-    RenderCommand::BeginRenderPass(ShadowPassInfo);
-
-    RenderCommand::SetRasterizerState(RasterizerState);
-    RenderCommand::SetDepthStencilState(DepthStencilState);
-    RenderCommand::SetBlendState(BlendState);
-
-    FViewConstants ViewConstants;
-    ViewConstants.VP = LightVP;
-    RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
-
-    bDepthOnly = true;
-    bShadowMapPass = true;
-
-    DrawStaticGroups(ViewMode);
-    DrawPackets(0, FirstTranslucentIndex, LightVP, ViewMode);
-
-    bDepthOnly = false;
-    bShadowMapPass = false;
-
-    RenderCommand::EndRenderPass(ShadowPassInfo);
-
-    ViewConstants.VP = CameraViewProjection;
-    ViewConstants.CameraPosition = CameraLocation;
-    RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
-}
-
-void FRenderer::RenderDirectionalShadowMap(const FMatrix &CameraViewProjection, const FVector &CameraLocation , const EViewMode ViewMode)
+void FRenderer::DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, EViewMode ViewMode)
 {
     FViewConstants ViewConstants{};
     ViewConstants.VP = LightVP;
@@ -830,9 +779,39 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &C
         return;
 
     // 같은 텍스처를 SRV와 DSV로 동시에 바인딩하지 않도록 해제
-    RenderCommand::UnbindShaderResource(10, EShaderBindFlagBits::Pixel);
+    RenderCommand::UnbindShaderResource(10, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
     const FMatrix &LightVP = LightData.DirectionalLight.ViewProjection;
+
+    FShadowPassDesc Desc{};
+    Desc.DepthView = ShadowMap->GetDSV();
+    Desc.Width = ShadowMap->GetWidth();
+    Desc.Height = ShadowMap->GetHeight();
+
+    if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode))
+        return;
+
+    // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
+    FViewConstants CameraViewConstants{};
+    CameraViewConstants.VP = CameraViewProjection;
+    CameraViewConstants.CameraPosition = CameraLocation;
+    RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
+}
+
+void FRenderer::RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
+{
+    // 그림자를 만드는 Spot은 0번 하나뿐이다
+    if (LightData.SpotLightCount == 0 || LightData.SpotLights[0].ShadowParameters.W <= 0.0f)
+        return;
+
+    FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetSpotShadowMap() : nullptr;
+    if (!ShadowMap || !ShadowMap->GetDSV())
+        return;
+
+    // 같은 텍스처를 SRV와 DSV로 동시에 바인딩하지 않도록 해제 (Gouraud는 VS에서도 읽는다)
+    RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+
+    const FMatrix &LightVP = LightData.SpotLights[0].ViewProjection;
 
     FShadowPassDesc Desc{};
     Desc.DepthView = ShadowMap->GetDSV();

@@ -41,6 +41,7 @@ struct FPointLightInfo
     float4 PositionRadius;
     float4 ColorIntensity;
     float4 FalloffEnabled;
+    float4 ShadowParameters; // C++ FPointLight와 크기(64바이트)를 맞춘다
 };
 
 struct FSpotLightInfo

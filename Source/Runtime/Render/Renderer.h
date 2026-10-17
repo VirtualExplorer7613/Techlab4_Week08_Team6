@@ -202,21 +202,21 @@ public:
         return ShadowRenderer ? ShadowRenderer->GetDirectionalShadowMap() : nullptr;
     }
 
-    
+    FTexture2D *GetSpotShadowMap() const
+    {
+        return ShadowRenderer ? ShadowRenderer->GetSpotShadowMap() : nullptr;
+    }
+
     ID3D11ShaderResourceView *GetSpotShadowMapSRV() const
     {
+        FTexture2D *SpotShadowMap = GetSpotShadowMap();
         return SpotShadowMap ? SpotShadowMap->GetSRV() : nullptr;
     }
 
 	ID3D11ShaderResourceView* GetDirectionalShadowMapSRV() const
     {
-        FTexture2D *ShadowMap = GetDirectionalShadowMap();
-        return ShadowMap ? ShadowMap->GetSRV() : nullptr;
-    }
-
-    FTexture2D *GetSpotShadowMap() const
-    {
-        return SpotShadowMap.get();
+        FTexture2D *DirectionalShadowMap = GetDirectionalShadowMap();
+        return DirectionalShadowMap ? DirectionalShadowMap->GetSRV() : nullptr;
     }
 
 private:
