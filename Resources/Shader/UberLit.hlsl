@@ -41,7 +41,7 @@ struct FPointLightInfo
     float4 PositionRadius;
     float4 ColorIntensity;
     float4 FalloffEnabled;
-    float4 ShadowParameters; // C++ FPointLight와 크기(64바이트)를 맞춘다
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
 };
 
 struct FSpotLightInfo
@@ -52,7 +52,7 @@ struct FSpotLightInfo
     float4 OutAngleInvCosDiff;
     float4 FowardVector;
     matrix ViewProjection;
-    float4 ShadowParameters;
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
 };
 
 struct FAmbientLightInfo
@@ -85,6 +85,7 @@ StructuredBuffer<FSpotLightInfo> SpotLights : register(t9);
 
 Texture2D<float> DirectionalShadowMap : register(t10);
 Texture2D<float> SpotShadowMap : register(t11);
+TextureCube<float> PointShadowMap : register(t12);
 
 cbuffer TileBasedCullingConstants : register(b4)
 {

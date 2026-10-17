@@ -105,6 +105,25 @@ std::array<FVector, 8> FShadowRenderer::LimitFrustumToShadowDistance(const std::
     return Result;
 }
 
+FMatrix FShadowRenderer::BuildPointLightView(const FVector &LightPosition, uint32 FaceIndex) const
+{
+    const FVector Eye = LightPosition;
+    const FVector Target = LightPosition + CubeFaceDirections[FaceIndex].Forward;
+    const FVector Up = CubeFaceDirections[FaceIndex].Up;
+
+    return FMatrix::MakeLookAt(Eye, Target, Up);
+}
+
+FMatrix FShadowRenderer::BuildPointLightProjection(float NearPlane, float FarPlane) const
+{
+    return FMatrix::MakePerspective(90.0f, 1.0f, NearPlane, FarPlane);
+}
+
+FMatrix FShadowRenderer::BuildPointLightVP(const FVector &LightPosition, float NearPlane, float FarPlane, uint32 FaceIndex) const
+{
+    return BuildPointLightView(LightPosition, FaceIndex) * BuildPointLightProjection(NearPlane, FarPlane);
+}
+
 bool FShadowRenderer::Init(uint32 ShadowMapSize)
 {
     D3D11_TEXTURE2D_DESC DirectionalDesc{};
@@ -131,6 +150,25 @@ bool FShadowRenderer::Init(uint32 ShadowMapSize)
     {
         SpotShadowMap.reset();
         return false;
+    }
+
+    D3D11_TEXTURE2D_DESC PointLightDesc{};
+    PointLightDesc.Width = ShadowMapSize;
+    PointLightDesc.Height = ShadowMapSize;
+    PointLightDesc.MipLevels = 1;
+    PointLightDesc.ArraySize = 6;
+    PointLightDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+    PointLightDesc.SampleDesc.Count = 1;
+    PointLightDesc.Usage = D3D11_USAGE_DEFAULT;
+    PointLightDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+    PointLightDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+
+    PointLightShadowMap = RenderCommand::CreateTextureCube(PointLightDesc, {});
+
+    if (!PointLightShadowMap || !PointLightShadowMap->GetRawPtr() || !PointLightShadowMap->GetFaceDSV(0) || !PointLightShadowMap->GetSRV())
+    {
+        PointLightShadowMap.reset();
+        //return false;
     }
 
     return true;

@@ -721,8 +721,8 @@ void FRenderer::DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, E
     ViewConstants.VP = LightVP;
     RenderCommand::UpdateBufferData(ViewCB.get(), &ViewConstants, sizeof(FViewConstants));
 
-    RenderCommand::BindConstantBuffer(0, ViewCB.get(), EShaderBindFlagBits::Vertex);
-    RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex);
+    RenderCommand::BindConstantBuffer(0, ViewCB.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
+    RenderCommand::BindConstantBuffer(2, PerObjectCB.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 
     bDepthOnly = true;
     RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -800,6 +800,7 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &C
 
 void FRenderer::RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
 {
+    // TODO : Atlas 도입시에 SpotLightCount > 1일 경우도 처리해야 한다.
     // 그림자를 만드는 Spot은 0번 하나뿐이다
     if (LightData.SpotLightCount == 0 || LightData.SpotLights[0].ShadowParameters.W <= 0.0f)
         return;
@@ -820,6 +821,24 @@ void FRenderer::RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraVi
 
     if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode))
         return;
+
+    // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
+    FViewConstants CameraViewConstants{};
+    CameraViewConstants.VP = CameraViewProjection;
+    CameraViewConstants.CameraPosition = CameraLocation;
+    RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
+}
+
+void FRenderer::RenderPointShadowMap(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
+{
+    // TODO : PointLightCount > 1일 경우도 처리해야 한다.
+    if (LightData.PointLightCount == 0 || LightData.PointLights[0].ShadowParameters.W <= 0.0f)
+    {
+        return;
+    }
+
+    RenderCommand::UnbindShaderResource(12, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+
 
     // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
     FViewConstants CameraViewConstants{};
