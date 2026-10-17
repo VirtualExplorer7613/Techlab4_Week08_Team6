@@ -33,11 +33,11 @@ public:
     bool BeginShadowPass(const FShadowPassDesc &Desc);
     void EndShadowPass();
 
-    FMatrix BuildDirectionalLightView(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection) const;
-    FBox CalculateLightSpaceBounds(const std::array<FVector, 8>& FrustumCornersWorld, const FMatrix& LightView) const;
-    FMatrix BuildDirectionalLightProjection(const FBox& LightSpaceBounds) const;
+    FBox CalculateLightSpaceBounds(const std::array<FVector, 8> &FrustumCornersWorld, const FMatrix &LightView) const;
 
-    FMatrix BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection) const;
+    FMatrix BuildDirectionalLightView(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection) const;    
+    FMatrix BuildDirectionalLightProjection(const FBox& LightSpaceBounds) const;
+    FMatrix BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection) const;    
 
     std::array<FVector, 8> LimitFrustumToShadowDistance(const std::array<FVector, 8>& Corners, float CameraNear, float CameraFar, float ShadowDistance) const;
 
@@ -51,6 +51,7 @@ public:
 
 private:
     TUniquePtr<FTexture2D> DirectionalShadowMap;
+    TUniquePtr<FTextureCube> PointLightShadowMap;    
     TUniquePtr<FTexture2D> SpotShadowMap;
     TUniquePtr<FTextureCube> PointLightShadowMap;
 };
