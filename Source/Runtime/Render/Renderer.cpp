@@ -774,7 +774,7 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &C
     if (LightData.DirectionalLight.ShadowParameters.W <= 0.0f)
         return;
 
-    FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetShadowMap() : nullptr;
+    FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetDirectionalShadowMap() : nullptr;
     if (!ShadowMap || !ShadowMap->GetDSV())
         return;
 

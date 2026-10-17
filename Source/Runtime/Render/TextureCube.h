@@ -17,8 +17,14 @@ public:
 		return Face < FaceCount ? FaceRTVs[Face].Get() : nullptr;
 	}
 
+    ID3D11DepthStencilView *GetFaceDSV(uint32 Face) const
+    {
+        return Face < FaceCount ? FaceDSVs[Face].Get() : nullptr;
+    }
+
 private:
 	void CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& InDesc);
 
 	ComPtr<ID3D11RenderTargetView> FaceRTVs[FaceCount];
+    ComPtr<ID3D11DepthStencilView> FaceDSVs[FaceCount];
 };

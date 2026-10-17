@@ -30,8 +30,8 @@ public:
 
     std::array<FVector, 8> LimitFrustumToShadowDistance(const std::array<FVector, 8>& Corners, float CameraNear, float CameraFar, float ShadowDistance) const;
 
-    FTexture2D *GetShadowMap() const { return ShadowMap.get(); }
+    FTexture2D *GetDirectionalShadowMap() const { return DirectionalShadowMap.get(); }    
 
 private:
-    TUniquePtr<FTexture2D> ShadowMap;
+    TUniquePtr<FTexture2D> DirectionalShadowMap;    
 };

@@ -107,23 +107,23 @@ std::array<FVector, 8> FShadowRenderer::LimitFrustumToShadowDistance(const std::
 
 bool FShadowRenderer::Init(uint32 ShadowMapSize)
 {
-    D3D11_TEXTURE2D_DESC Desc{};
-    Desc.Width = ShadowMapSize;
-    Desc.Height = ShadowMapSize;
-    Desc.MipLevels = 1;
-    Desc.ArraySize = 1;
-    Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
-    Desc.SampleDesc.Count = 1;
-    Desc.Usage = D3D11_USAGE_DEFAULT;
-    Desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+    D3D11_TEXTURE2D_DESC DirectionalDesc{};
+    DirectionalDesc.Width = ShadowMapSize;
+    DirectionalDesc.Height = ShadowMapSize;
+    DirectionalDesc.MipLevels = 1;
+    DirectionalDesc.ArraySize = 1;
+    DirectionalDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+    DirectionalDesc.SampleDesc.Count = 1;
+    DirectionalDesc.Usage = D3D11_USAGE_DEFAULT;
+    DirectionalDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
 
-    ShadowMap = RenderCommand::CreateTexture2D(Desc);
+    DirectionalShadowMap = RenderCommand::CreateTexture2D(DirectionalDesc);
 
-    if (!ShadowMap || !ShadowMap->GetRawPtr() || !ShadowMap->GetDSV() || !ShadowMap->GetSRV())
+    if (!DirectionalShadowMap || !DirectionalShadowMap->GetRawPtr() || !DirectionalShadowMap->GetDSV() || !DirectionalShadowMap->GetSRV())
     {
-        ShadowMap.reset();
+        DirectionalShadowMap.reset();
         return false;
-    }
+    }    
 
     return true;
 }
