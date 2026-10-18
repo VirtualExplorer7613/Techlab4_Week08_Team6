@@ -103,9 +103,21 @@ bool FRenderer::Init()
 	LightCB = RenderCommand::CreateConstantBuffer(sizeof(FLightGlobalConstants));
 
     ShadowRenderer = MakeUnique<FShadowRenderer>();
+    CascadeDebugCB = RenderCommand::CreateConstantBuffer(sizeof(FCascadeDebugConstants));
 
     if (!ShadowRenderer->Init(2048))
         return false;
+
+    if (!CascadeShadowMaps.Init(2048, 4))
+    {
+        HTR_LOG(Error, "[CSM] Failed to create cascade depth maps.");
+        return false;
+    }
+
+    for (uint32 Index = 0; Index < CascadeShadowMaps.GetCascadeCount(); ++Index)
+    {
+        RenderCommand::GetContext()->ClearDepthStencilView(CascadeShadowMaps.GetSliceDSV(Index), D3D11_CLEAR_DEPTH, 1.0f, 0);
+    }
 
 	if (!CreateDynamicStructuredBuffer(sizeof(FPointLight), NUM_POINT_LIGHT, PointLightBuffer, PointLightSRV) || !CreateDynamicStructuredBuffer(sizeof(FSpotLight), NUM_SPOT_LIGHT, SpotLightBuffer, SpotLightSRV))
 	{
@@ -195,6 +207,80 @@ void FRenderer::RenderAll(FRenderQueue& InQueue, const FMatrix& ViewProjection, 
 	RenderTranslucent(ViewProjection, ViewMode);
 }
 
+void FRenderer::RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, EViewMode ViewMode)
+{
+    const uint32 Count = CascadeShadowMaps.GetCascadeCount();
+
+    if (Count == 0)
+        return;
+
+    // 미리보기 Pixel Shader는 t0에서 배열을 읽는다.
+    RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+
+   // 장면 셰이더가 읽던 캐스케이드 배열 해제.
+    RenderCommand::UnbindShaderResource(12, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+
+
+    const bool bCastShadows = LightData.DirectionalLight.ShadowParameters.W > 0.0f;
+
+    for (uint32 Index = 0; Index < Count; ++Index)
+    {
+        FShadowPassDesc Desc{};
+
+        Desc.DepthView = CascadeShadowMaps.GetSliceDSV(Index);
+        Desc.Width = CascadeShadowMaps.GetResolution();
+        Desc.Height = CascadeShadowMaps.GetResolution();
+
+        if (!bCastShadows)
+        {
+            RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+            continue;
+        }
+
+        // 머지 전 : 모든 Slice에 기존 단일 LightVP 사용.
+        // 머지 후 이 부분을 캐스케이드별 LightVP[Index]로 교체한다.
+        const FMatrix &LightVP = LightData.DirectionalLight.ViewProjection;
+        if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode))
+            break;
+    }
+
+    // Shadow Draw가 변경한 ViewCB를 복원한다.
+    FViewConstants CameraConstants{};
+    CameraConstants.VP = CameraViewProjection;
+    CameraConstants.CameraPosition = CameraLocation;
+
+    RenderCommand::UpdateBufferData(ViewCB.get(), &CameraConstants, sizeof(FViewConstants));
+}
+
+void FRenderer::UpdateCascadeDebugConstants(const FVector &CameraForward)
+{
+    FCascadeDebugConstants Constants{};
+
+    const float DistributionExponent = 2.0f; // E. 1이면 균등 분할
+    const float StartDepth = 0.0f;
+    const float EndDepth = 75.0f; // 분할할 전체 깊이 범위
+
+    const float E = DistributionExponent;
+    const float E2 = E * E;
+    const float E3 = E2 * E;
+
+    // 구간 길이의 비율: 1 : E : E^2 : E^3
+    const float BaseLength = (EndDepth - StartDepth) / (1.0f + E + E2 + E3);
+
+    Constants.SplitDepths = FVector4(StartDepth + BaseLength, StartDepth + BaseLength * (1.0f + E), StartDepth + BaseLength * (1.0f + E + E2), 0.0f);
+
+    const FVector Forward = CameraForward.Normalized();
+    Constants.CameraForward = FVector4(Forward.X, Forward.Y, Forward.Z, 0.0f);
+
+    Constants.Enabled = bCascadeDebugColors ? 1u : 0u;
+    Constants.CascadeCount = CascadeShadowMaps.GetCascadeCount();
+
+    const uint32 Resolution = CascadeShadowMaps.GetResolution();
+    Constants.InvResolution = Resolution > 0 ? 1.0f / static_cast<float>(Resolution) : 0.0f;
+
+    RenderCommand::UpdateBufferData(CascadeDebugCB.get(), &Constants, sizeof(Constants));
+}
+
 void FRenderer::BindLightResources()
 {
 	RenderCommand::BindConstantBuffer(3, LightCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
@@ -209,6 +295,11 @@ void FRenderer::BindLightResources()
     RenderCommand::BindShaderResource(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindShaderResource(11, GetSpotShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindSamplerState(1, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+
+    RenderCommand::BindConstantBuffer(5, CascadeDebugCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    ID3D11ShaderResourceView *CascadeSRV = CascadeShadowMaps.GetArraySRV();
+    Context->VSSetShaderResources(12, 1, &CascadeSRV);
+    Context->PSSetShaderResources(12, 1, &CascadeSRV);
 }
 
 void FRenderer::RenderOpaque(const FMatrix& ViewProjection, const EViewMode ViewMode, bool bDepthPrepassed)

@@ -85,6 +85,7 @@ StructuredBuffer<FSpotLightInfo> SpotLights : register(t9);
 
 Texture2D<float> DirectionalShadowMap : register(t10);
 Texture2D<float> SpotShadowMap : register(t11);
+Texture2DArray<float> CascadeShadowMap : register(t12);
 
 cbuffer TileBasedCullingConstants : register(b4)
 {
@@ -97,6 +98,17 @@ cbuffer TileBasedCullingConstants : register(b4)
     uint TilePointLightCount;
     uint TileSpotLightCount;
     uint2 Padding;
+};
+
+cbuffer CascadeDebugConstants : register(b5)
+{
+    float4 CascadeCameraForward;
+    float4 CascadeSplitDepths;
+
+    uint CascadeDebugEnabled;
+    uint CascadeCount;
+    float CascadeInvResolution;
+    float CascadeDebugPadding;
 };
 
 #define TILE_SIZE 16
@@ -265,6 +277,39 @@ float3 CalculateAmbientLight(FAmbientLightInfo info)
     return info.ColorIntensity.xyz * info.ColorIntensity.w;
 }
 
+bool UseCascadeDebug()
+{
+    return CascadeDebugEnabled != 0 && CascadeCount > 0;
+}
+
+uint SelectDebugCascade(float3 worldPos)
+{
+    float viewDepth = max(
+        dot(worldPos - CameraLocation, CascadeCameraForward.xyz),
+        0.0f);
+
+    uint index = 0;
+    index += viewDepth > CascadeSplitDepths.x ? 1u : 0u;
+    index += viewDepth > CascadeSplitDepths.y ? 1u : 0u;
+    index += viewDepth > CascadeSplitDepths.z ? 1u : 0u;
+
+    return min(index, max(CascadeCount, 1u) - 1u);
+}
+
+float3 GetDebugCascadeColor(uint index)
+{
+    if (index == 0)
+        return float3(1, 0, 0);
+    
+    if (index == 1)
+        return float3(0, 1, 0);
+    
+    if (index == 2)
+        return float3(0, 0, 1);
+    
+    return float3(1, 0, 1);
+}
+
 float CalculateDirectionalShadow(float3 worldPos, float3 normal)
 {
     float4 shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
@@ -282,9 +327,16 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal)
     {
         return 1.0f;
     }
-    
-    float2 texelSize = float2(DirectionalLight.ShadowParameters.z, DirectionalLight.ShadowParameters.z);
 
+    bool useCascade = UseCascadeDebug();
+    uint cascadeIndex = useCascade ? SelectDebugCascade(worldPos) : 0u;
+
+    float invResolution = useCascade ? CascadeInvResolution : DirectionalLight.ShadowParameters.z;
+    
+    //float2 texelSize = float2(DirectionalLight.ShadowParameters.z, DirectionalLight.ShadowParameters.z);
+
+    float2 texelSize = float2(invResolution, invResolution);
+    
     float NdotL = saturate(dot(normal, -DirectionalLight.Direction.xyz));
     
     float bias = DirectionalLight.ShadowParameters.x + DirectionalLight.ShadowParameters.y * (1.0f - NdotL);
@@ -295,7 +347,15 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal)
         for (int y = -1; y <= 1; ++y)
         {
             float2 offset = float2(x, y) * texelSize;
-            float depth = DirectionalShadowMap.SampleLevel(g_SampleShadow, shadowPos.xy + offset, 0);
+            float depth;
+            if (useCascade)
+            {
+                depth = CascadeShadowMap.SampleLevel(g_SampleShadow, float3(shadowPos.xy + offset, (float) cascadeIndex), 0);
+            }
+            else
+            {
+                depth = DirectionalShadowMap.SampleLevel(g_SampleShadow, shadowPos.xy + offset, 0);
+            }
             visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
         }
     }
@@ -381,6 +441,20 @@ FLightResult CalculateLighting(float3 worldPos, float3 normal, float3 viewDir)
     Total.Specular += Directional.Specular;
 
     return Total;
+}
+
+float3 ApplyCascadeDebugColor(float3 shadedColor, float3 worldPos, float3 normal)
+{
+    if (!UseCascadeDebug())
+        return shadedColor;
+
+    float visibility = CalculateDirectionalShadow(worldPos, normal);
+    float shadowAmount = saturate(1.0f - visibility);
+
+    uint cascadeIndex = SelectDebugCascade(worldPos);
+    float3 debugColor = GetDebugCascadeColor(cascadeIndex);
+
+    return lerp(shadedColor, debugColor, shadowAmount);
 }
 
 struct VS_INPUT
@@ -522,6 +596,7 @@ float4 mainPS(PS_INPUT input) : SV_TARGET
 #endif
     finalRGB = ACESFilmicToneMapping(finalRGB);
     finalRGB = pow(finalRGB, 1.0f / 2.2f);
-    
+
+    finalRGB = ApplyCascadeDebugColor(finalRGB, input.worldPos, normal);    
     return float4(finalRGB, alpha);
 }

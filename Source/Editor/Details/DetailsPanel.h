@@ -6,9 +6,11 @@
 #include "Engine/World.h"
 
 struct FTransform;
+class ULightComponent;
 
 using DetailsSelectionCallback = std::function<void(UActorComponent*)>;
 using DetailsDeleteComponentCallback = std::function<void(UActorComponent*)>;
+using DetailsShadowPreviewCallback = std::function<void(ULightComponent *)>;
 
 class FDetailsPanel : public IEditorPanel
 {
@@ -30,6 +32,7 @@ public:
 
 	void SetSelectionCallback(DetailsSelectionCallback InCallback) { Callback = InCallback; }
 	void SetDeleteComponentCallback(DetailsDeleteComponentCallback InCallback) { DeleteCallback = InCallback; }
+    void SetShadowPreviewCallback(DetailsShadowPreviewCallback InCallback) { ShadowPreviewCallback = InCallback; }
 
 	void SetWorld(UWorld* InWorld) { World = InWorld; }
 
@@ -47,6 +50,7 @@ private:
 	UActorComponent* TargetComponent = nullptr;
 	DetailsSelectionCallback Callback;
 	DetailsDeleteComponentCallback DeleteCallback;
+    DetailsShadowPreviewCallback ShadowPreviewCallback;
 
 	UActorComponent* PendingDeleteComponent = nullptr;
 	UActorComponent* EditingNameComponent = nullptr;

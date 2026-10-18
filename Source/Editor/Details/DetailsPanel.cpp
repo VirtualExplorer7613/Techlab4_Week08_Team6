@@ -1102,9 +1102,12 @@ void FDetailsPanel::OnRender()
 				PendingDeleteComponent = nullptr;
 			}
 
-            if (Cast<ULightComponent>(TargetComponent))
+            if (ULightComponent *Light = Cast<ULightComponent>(TargetComponent))
             {
-                DrawShadowTexture(Cast<ULightComponent>(TargetComponent));
+                if (ShadowPreviewCallback)
+                    ShadowPreviewCallback(Light);
+                else
+                    DrawShadowTexture(Light);
             }
 		}		
 	}	
