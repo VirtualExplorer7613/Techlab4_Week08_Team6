@@ -52,6 +52,5 @@ public:
 private:
     TUniquePtr<FTexture2D> DirectionalShadowMap;
     TUniquePtr<FTextureCube> PointLightShadowMap;    
-    TUniquePtr<FTexture2D> SpotShadowMap;
-    TUniquePtr<FTextureCube> PointLightShadowMap;
+    TUniquePtr<FTexture2D> SpotShadowMap;    
 };

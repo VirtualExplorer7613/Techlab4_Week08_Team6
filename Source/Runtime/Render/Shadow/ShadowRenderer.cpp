@@ -116,7 +116,7 @@ FMatrix FShadowRenderer::BuildPointLightView(const FVector &LightPosition, uint3
 
 FMatrix FShadowRenderer::BuildPointLightProjection(float NearPlane, float FarPlane) const
 {
-    return FMatrix::MakePerspective(90.0f, 1.0f, NearPlane, FarPlane);
+    return FMatrix::MakePerspective(FMath::DegreesToRadians(90.0f), 1.0f, NearPlane, FarPlane);
 }
 
 FMatrix FShadowRenderer::BuildPointLightVP(const FVector &LightPosition, float NearPlane, float FarPlane, uint32 FaceIndex) const

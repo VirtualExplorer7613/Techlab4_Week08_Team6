@@ -207,6 +207,10 @@ public:
     {
         return ShadowRenderer ? ShadowRenderer->GetSpotShadowMap() : nullptr;
     }
+    FTextureCube* GetPointShadowMap() const
+    {
+        return ShadowRenderer ? ShadowRenderer->GetPointLightShadowMap() : nullptr;
+    }
 
     ID3D11ShaderResourceView *GetSpotShadowMapSRV() const
     {

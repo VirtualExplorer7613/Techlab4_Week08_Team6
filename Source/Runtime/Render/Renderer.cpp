@@ -208,6 +208,7 @@ void FRenderer::BindLightResources()
 
     RenderCommand::BindShaderResource(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindShaderResource(11, GetSpotShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindShaderResource(12, GetPointShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindSamplerState(1, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 }
 
@@ -837,8 +838,29 @@ void FRenderer::RenderPointShadowMap(const FScene &Scene, const FMatrix &CameraV
         return;
     }
 
+    FTextureCube *ShadowMap = ShadowRenderer ? ShadowRenderer->GetPointLightShadowMap() : nullptr;
+    if (!ShadowMap || !ShadowMap->GetFaceDSV(0))
+    {
+        return;
+    }
+
     RenderCommand::UnbindShaderResource(12, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
+    const FVector LightPosition = FVector(LightData.PointLights[0].PositionRadius.X, LightData.PointLights[0].PositionRadius.Y, LightData.PointLights[0].PositionRadius.Z);
+    const float Far = LightData.PointLights[0].PositionRadius.W;
+    const float Near = 0.1f;
+
+    for (uint32 face = 0; face < 6; face++)
+    {
+        FShadowPassDesc Desc{};
+        Desc.DepthView = ShadowMap->GetFaceDSV(face);
+        Desc.Width = ShadowMap->GetWidth();
+        Desc.Height = ShadowMap->GetHeight();
+
+        const FMatrix FaceLightVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, face);
+
+        RenderShadowDepth(Scene, Desc, FaceLightVP, ViewMode);
+    }
 
     // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
     FViewConstants CameraViewConstants{};
