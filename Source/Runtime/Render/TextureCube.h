@@ -2,6 +2,12 @@
 
 #include "Texture.h"
 
+struct FCubeFaceDirection
+{
+    FVector Forward;
+    FVector Up;
+};
+
 class FTextureCube : public FTexture
 {
 public:

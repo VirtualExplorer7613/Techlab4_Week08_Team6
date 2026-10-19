@@ -213,12 +213,22 @@ bool UEditorEngine::Init()
         // 기존 Shadow Map 이미지 위.
         if (bDirectional)
         {
-            bool bEnabled = Renderer->GetCascadeDebugColors();
+            bool bCSMEnabled = Renderer->GetCSMEnabled();
 
-            if (ImGui::Checkbox("Cascade Shadow Colors", &bEnabled))
+            if (ImGui::Checkbox("Cascade Shadow Map", &bCSMEnabled))
             {
-                Renderer->SetCascadeDebugColors(bEnabled);
+                Renderer->SetCSMEnabled(bCSMEnabled);
             }
+
+            bool bDebugColors = Renderer->GetCascadeDebugColors();
+
+            ImGui::BeginDisabled(!bCSMEnabled);
+
+            if (ImGui::Checkbox("Cascade Shadow Colors", &bDebugColors))
+            {
+                Renderer->SetCascadeDebugColors(bDebugColors);
+            }
+            ImGui::EndDisabled();
         }
 
         // 기존 단일 Shadow Map 이미지.
@@ -988,11 +998,14 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	if (Settings.bDrawPrimitives)
 		Renderer->RenderQueueSorting(RenderQueue, ViewProjection, ViewCameraLocation);
 
-    Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
-    Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+    const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
 
+    Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+    Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+    Renderer->RenderPointShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+
+    Renderer->UpdateCascadeDebugConstants(ViewWorld.GetScene(), ViewProjection, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex));
     Renderer->RenderCascadeShadowPreview(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
-    Renderer->UpdateCascadeDebugConstants(ViewCameraForward);
 
 	if (bPrepass)
 	{

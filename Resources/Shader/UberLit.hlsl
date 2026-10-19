@@ -41,7 +41,7 @@ struct FPointLightInfo
     float4 PositionRadius;
     float4 ColorIntensity;
     float4 FalloffEnabled;
-    float4 ShadowParameters; // C++ FPointLight와 크기(64바이트)를 맞춘다
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
 };
 
 struct FSpotLightInfo
@@ -52,7 +52,7 @@ struct FSpotLightInfo
     float4 OutAngleInvCosDiff;
     float4 FowardVector;
     matrix ViewProjection;
-    float4 ShadowParameters;
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
 };
 
 struct FAmbientLightInfo
@@ -85,7 +85,8 @@ StructuredBuffer<FSpotLightInfo> SpotLights : register(t9);
 
 Texture2D<float> DirectionalShadowMap : register(t10);
 Texture2D<float> SpotShadowMap : register(t11);
-Texture2DArray<float> CascadeShadowMap : register(t12);
+Texture2DArray<float> CascadeShadowMap : register(t13);
+TextureCube<float> PointShadowMap : register(t12);
 
 cbuffer TileBasedCullingConstants : register(b4)
 {
@@ -102,13 +103,18 @@ cbuffer TileBasedCullingConstants : register(b4)
 
 cbuffer CascadeDebugConstants : register(b5)
 {
+    row_major float4x4 CascadeLightVP[4];
+
     float4 CascadeCameraForward;
     float4 CascadeSplitDepths;
 
-    uint CascadeDebugEnabled;
-    uint CascadeCount;
+    float CascadeShadowDistance;
     float CascadeInvResolution;
-    float CascadeDebugPadding;
+    uint CascadeCount;
+    uint CSMEnabled;
+
+    uint DebugColorsEnabled;
+    uint3 CascadePadding;
 };
 
 #define TILE_SIZE 16
@@ -169,7 +175,40 @@ FLightResult BlinnPhong(float3 N, float3 L, float3 V, float3 Radiance)
     return Result;
 }
 
-FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 normal, float3 viewDir)
+float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint index)
+{
+    // TODO : 여러개 지원 해야함
+    if (index != 0 || PointLights[0].ShadowParameters.w == 0 || bReceiveShadow == 0)
+    {
+        return 1.0f;
+    }
+
+    float3 lightToPixel = worldPos - lightPos;    
+    if (length(lightToPixel) > PointLights[0].PositionRadius.w)
+    {
+        return 1.0f;
+    }
+
+    float near = 0.1f;
+    float far = PointLights[0].PositionRadius.w;
+    float viewDepth = max(abs(lightToPixel.x), max(abs(lightToPixel.y), abs(lightToPixel.z)));
+    float projDepth = far / (far - near) - (near * far) / ((far - near) * viewDepth);
+
+    float NdotL = saturate(dot(normal, -normalize(lightToPixel).xyz));
+    float2 texelSize = float2(PointLights[0].ShadowParameters.z, PointLights[0].ShadowParameters.z);
+
+    float bias = PointLights[0].ShadowParameters.x + PointLights[0].ShadowParameters.y * (1.0f - NdotL);
+    
+    float visibility = 0.0f;
+
+    // Did not PCF
+    float depth = PointShadowMap.SampleLevel(g_SampleShadow, lightToPixel, 0);
+    visibility += (projDepth - bias) <= depth ? 1.0f : 0.0f;
+    
+    return visibility;
+}
+
+FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
 {
     float4 PositionRadius = info.PositionRadius;
     float4 ColorIntensity = info.ColorIntensity;
@@ -184,13 +223,21 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
     float falloff = pow(Basefalloff, max(FalloffEnabled.x, 0.001f));
 
     float enabled = FalloffEnabled.y;
-    float3 radiance = ColorIntensity.rgb * ColorIntensity.w * falloff * enabled;
+    float3 radiance = ColorIntensity.rgb * ColorIntensity.w * falloff * enabled;    
 
-    return BlinnPhong(normal, lightDir, viewDir, radiance);
+    FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
+
+    float Shadow = CalculatePointShadow(worldPos, info.PositionRadius.xyz, normal, index);
+
+    Result.Diffuse *= Shadow;
+    Result.Specular *= Shadow;
+    
+    return Result;
 }
 
 float CalculateSpotShadow(float3 worldPos, float3 normal, uint index)
 {
+    // TODO : 여러개 지원 해야함
     if (index != 0)
     {
         return 1;
@@ -277,17 +324,26 @@ float3 CalculateAmbientLight(FAmbientLightInfo info)
     return info.ColorIntensity.xyz * info.ColorIntensity.w;
 }
 
+bool UseCSM()
+{
+    return CSMEnabled != 0 && CascadeCount > 0;
+}
+
+
 bool UseCascadeDebug()
 {
-    return CascadeDebugEnabled != 0 && CascadeCount > 0;
+    return UseCSM() && DebugColorsEnabled != 0;
+}
+
+float GetCascadeViewDepth(float3 worldPos)
+{
+    return dot(worldPos - CameraLocation, CascadeCameraForward.xyz);
 }
 
 uint SelectDebugCascade(float3 worldPos)
 {
-    float viewDepth = max(
-        dot(worldPos - CameraLocation, CascadeCameraForward.xyz),
-        0.0f);
-
+    // float viewDepth = max(dot(worldPos - CameraLocation, CascadeCameraForward.xyz), 0.0f);
+    float viewDepth = max(GetCascadeViewDepth(worldPos), 0.0f);
     uint index = 0;
     index += viewDepth > CascadeSplitDepths.x ? 1u : 0u;
     index += viewDepth > CascadeSplitDepths.y ? 1u : 0u;
@@ -312,7 +368,21 @@ float3 GetDebugCascadeColor(uint index)
 
 float CalculateDirectionalShadow(float3 worldPos, float3 normal)
 {
-    float4 shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
+    bool useCascade = UseCSM();
+    uint cascadeIndex = useCascade ? SelectDebugCascade(worldPos) : 0u;
+
+    float4 shadowPos;
+
+    if (useCascade)
+    {
+        shadowPos = mul(float4(worldPos, 1.0f), CascadeLightVP[cascadeIndex]);
+    }
+    else
+    {
+        shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
+    }
+    
+    // float4 shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
     shadowPos.xyz /= shadowPos.w; // W divde
     shadowPos.x = shadowPos.x * 0.5f + 0.5f;
     shadowPos.y = -shadowPos.y * 0.5f + 0.5f;
@@ -328,11 +398,9 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal)
         return 1.0f;
     }
 
-    bool useCascade = UseCascadeDebug();
-    uint cascadeIndex = useCascade ? SelectDebugCascade(worldPos) : 0u;
-
     float invResolution = useCascade ? CascadeInvResolution : DirectionalLight.ShadowParameters.z;
-    
+    //float invResolution = DirectionalLight.ShadowParameters.z;
+
     //float2 texelSize = float2(DirectionalLight.ShadowParameters.z, DirectionalLight.ShadowParameters.z);
 
     float2 texelSize = float2(invResolution, invResolution);
@@ -401,7 +469,7 @@ FLightResult CalculateLightingTiled(float2 PixelPos, float3 worldPos, float3 nor
         }
         else
         {
-            Light = CalculatePointLight(PointLights[Id], worldPos, normal, viewDir);
+            Light = CalculatePointLight(PointLights[Id], worldPos, normal, viewDir, Id);
         }
         Total.Diffuse += Light.Diffuse;
         Total.Specular += Light.Specular;
@@ -422,7 +490,7 @@ FLightResult CalculateLighting(float3 worldPos, float3 normal, float3 viewDir)
     //PointLight
     for (uint i = 0; i < PointLightCount; ++i)
     {
-        FLightResult Light = CalculatePointLight(PointLights[i], worldPos, normal, viewDir);
+        FLightResult Light = CalculatePointLight(PointLights[i], worldPos, normal, viewDir, i);
         Total.Diffuse += Light.Diffuse;
         Total.Specular += Light.Specular;
     }
@@ -448,6 +516,21 @@ float3 ApplyCascadeDebugColor(float3 shadedColor, float3 worldPos, float3 normal
     if (!UseCascadeDebug())
         return shadedColor;
 
+    float viewDepth = GetCascadeViewDepth(worldPos);
+
+    if (viewDepth < 0.0f || viewDepth > CascadeShadowDistance)
+    {
+        return shadedColor;
+    }
+
+    // Direction은 빛이 진행하는 방향.
+    // 반대로 뒤집어 표면에서 광원으로 향하는 방향을 구한다.
+    float3 lightDir = normalize(-DirectionalLight.Direction.xyz);
+
+    float NdotL = dot(normal, lightDir);
+    if (NdotL <= 0.0f)
+        return shadedColor;
+    
     float visibility = CalculateDirectionalShadow(worldPos, normal);
     float shadowAmount = saturate(1.0f - visibility);
 

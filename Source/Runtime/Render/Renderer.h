@@ -114,16 +114,24 @@ static_assert(sizeof(FLightGlobalConstants) == 144, "FLightGlobalConstants must 
 
 struct alignas(16) FCascadeDebugConstants
 {
+    FMatrix LightVP[4];
+
     FVector4 CameraForward = FVector4(1, 0, 0, 0);
 
     // 임시 경계값, 월드 단위. W는 사용하지 않는다.
     FVector4 SplitDepths = FVector4(5, 15, 30, 0);
 
-    uint32 Enabled = 0;
-    uint32 CascadeCount = 0;
+    // 16바이트
+    float ShadowDistance = 0.0f;
     float InvResolution = 0.0f;
-    float Padding = 0.0f;
+    uint32 CascadeCount = 0;
+    uint32 CSMEnabled = 0;
+    // 16바이트
+    uint32 DebugColorsEnabled = 0;
+    uint32 Padding[3] = {};
 };
+
+static_assert(sizeof(FCascadeDebugConstants) == 320, "FCascadeDebugConstants Size Error");
 
 class FRenderer
 {
@@ -164,11 +172,18 @@ public:
 	uint8* BeginObjectConstants(uint32 MaxSlots);
 	void EndObjectConstants();
 
+    void UploadLightGlobalConstants(const FMatrix &DirectionalLightVP);
+
 	void SetLight(const FLightConstants& LightData);
 
-    bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc &Desc, const FMatrix &LightVP, EViewMode ViewMode);
-    void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+    // 광원별 DSV와 Light VP를 받아 공통 Shadow Depth Pass를 실행한다.
+    bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc& Desc, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters = nullptr);
+
+    // Directional Light의 그림자 맵을 렌더링하고 메인 카메라의 ViewCB를 복원한다.
+    void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, float CameraNear, float CameraFar, bool bOrthographic, const EViewMode ViewMode);
+
     void RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+    void RenderPointShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
 
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
 	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World)
@@ -220,6 +235,10 @@ public:
     {
         return ShadowRenderer ? ShadowRenderer->GetSpotShadowMap() : nullptr;
     }
+    FTextureCube* GetPointShadowMap() const
+    {
+        return ShadowRenderer ? ShadowRenderer->GetPointLightShadowMap() : nullptr;
+    }
 
     ID3D11ShaderResourceView *GetSpotShadowMapSRV() const
     {
@@ -251,6 +270,18 @@ public:
     }
 
     void UpdateCascadeDebugConstants(const FVector &CameraForward);
+
+    void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
+
+    void SetCSMEnabled(bool bEnabled)
+    {
+        bCSMEnabled = bEnabled;
+    }
+
+    bool GetCSMEnabled() const
+    {
+        return bCSMEnabled;
+    }
 
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
@@ -304,7 +335,9 @@ private:
 
     TUniquePtr<FShadowRenderer> ShadowRenderer;
 
-    void DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, EViewMode ViewMode);
+    // 카메라 RenderQueue와 독립적으로 Scene의 Shadow Caster를 렌더링한다.
+    // Caster 목록이 전달되면 해당 목록을, 없으면 Scene.Proxies를 순회한다.
+    void DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters = nullptr);
 
 	//DepthPrepass 시 잠깐 켜짐, 머테리얼 바인딩을 건너뜀
 	bool bDepthOnly = false;
@@ -314,6 +347,10 @@ private:
 
     // Shadow map pass에서만 사용
     bool bShadowMapPass = false;
+
+    FCascadeDebugConstants CascadeConstants{};
+    bool bCSMEnabled = true;
+    float CSMShadowDistance = 40.0f;
 
     FCascadeShadowMaps CascadeShadowMaps;
     bool bCascadeDebugColors = false;

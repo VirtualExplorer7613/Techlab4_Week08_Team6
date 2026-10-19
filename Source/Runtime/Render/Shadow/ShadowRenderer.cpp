@@ -4,6 +4,8 @@
 #include "Math/Frustum.h"
 #include "Render/RenderCommand.h"
 
+#include <limits>
+
 FMatrix FShadowRenderer::BuildDirectionalLightView(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection) const
 {
     FVector Center(0.0f, 0.0f, 0.0f);
@@ -74,17 +76,58 @@ FMatrix FShadowRenderer::BuildDirectionalLightProjection(const FBox& LightSpaceB
     );
 }
 
+
 FMatrix FShadowRenderer::BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection) const
 {
     const std::array<FVector, 8> Corners = GetFrustumCornersWorld(CameraVP);
     const std::array<FVector, 8> ShadowCorners = LimitFrustumToShadowDistance(Corners, CameraNear, CameraFar, ShadowDistance);
 
-    const FMatrix LightView = BuildDirectionalLightView(ShadowCorners, LightDirection);
-    const FBox LightSpaceBounds = CalculateLightSpaceBounds(ShadowCorners, LightView);
-    const FMatrix LightProjection = BuildDirectionalLightProjection(LightSpaceBounds);
-
-    return LightView * LightProjection;
+    return BuildDirectionalLightVPFromCorners(ShadowCorners, LightDirection);
 }
+
+
+FMatrix FShadowRenderer::BuildDirectionalLightVPFromCorners(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection, float MinCasterDepth) const
+{
+    FVector Center(0.0f, 0.0f, 0.0f);
+    for (const FVector &Corner : FrustumCornersWorld)
+        Center += Corner;
+    Center /= 8.0f;
+
+    // Frustum을 감싸는 구의 반경을 이용해 카메라 회전에도 투영 크기를 일정하게 유지한다.
+    float Radius = 0.0f;
+    for (const FVector &Corner : FrustumCornersWorld)
+        Radius = std::max(Radius, (Corner - Center).Size());
+
+    Radius = std::ceil(Radius * 16.0f) / 16.0f;
+
+    const FMatrix LightView = BuildDirectionalLightView(FrustumCornersWorld, LightDirection);
+    FBox LightSpaceBounds = CalculateLightSpaceBounds(FrustumCornersWorld, LightView);
+
+    // Frustum보다 광원 쪽에 있는 Caster까지 깊이 범위를 확장한다.
+    LightSpaceBounds.Min.X = std::min(LightSpaceBounds.Min.X, MinCasterDepth);
+
+    const float Extent = Radius * 1.01f;
+    LightSpaceBounds.Min.Y = -Extent;
+    LightSpaceBounds.Max.Y = Extent;
+    LightSpaceBounds.Min.Z = -Extent;
+    LightSpaceBounds.Max.Z = Extent;
+
+    FMatrix LightVP = LightView * BuildDirectionalLightProjection(LightSpaceBounds);
+
+    // Shadow Map의 투영 위치를 텍셀 격자에 정렬해 미세한 흔들림을 줄인다.
+    if (DirectionalShadowMap && DirectionalShadowMap->GetWidth() > 0 && DirectionalShadowMap->GetHeight() > 0)
+    {
+        const float HalfWidth = static_cast<float>(DirectionalShadowMap->GetWidth()) * 0.5f;
+        const float HalfHeight = static_cast<float>(DirectionalShadowMap->GetHeight()) * 0.5f;
+        const FVector Origin = LightVP.TransformPosition(FVector(0.0f, 0.0f, 0.0f));
+
+        LightVP.M[3][0] += (std::round(Origin.X * HalfWidth) - Origin.X * HalfWidth) / HalfWidth;
+        LightVP.M[3][1] += (std::round(Origin.Y * HalfHeight) - Origin.Y * HalfHeight) / HalfHeight;
+    }
+
+    return LightVP;
+}
+
 
 std::array<FVector, 8> FShadowRenderer::LimitFrustumToShadowDistance(const std::array<FVector, 8>& Corners, float CameraNear, float CameraFar, float ShadowDistance) const
 {
@@ -103,6 +146,25 @@ std::array<FVector, 8> FShadowRenderer::LimitFrustumToShadowDistance(const std::
     }
 
     return Result;
+}
+
+FMatrix FShadowRenderer::BuildPointLightView(const FVector &LightPosition, uint32 FaceIndex) const
+{
+    const FVector Eye = LightPosition;
+    const FVector Target = LightPosition + CubeFaceDirections[FaceIndex].Forward;
+    const FVector Up = CubeFaceDirections[FaceIndex].Up;
+
+    return FMatrix::MakeLookAt(Eye, Target, Up);
+}
+
+FMatrix FShadowRenderer::BuildPointLightProjection(float NearPlane, float FarPlane) const
+{
+    return FMatrix::MakePerspective(FMath::DegreesToRadians(90.0f), 1.0f, NearPlane, FarPlane);
+}
+
+FMatrix FShadowRenderer::BuildPointLightVP(const FVector &LightPosition, float NearPlane, float FarPlane, uint32 FaceIndex) const
+{
+    return BuildPointLightView(LightPosition, FaceIndex) * BuildPointLightProjection(NearPlane, FarPlane);
 }
 
 bool FShadowRenderer::Init(uint32 ShadowMapSize)
@@ -131,6 +193,25 @@ bool FShadowRenderer::Init(uint32 ShadowMapSize)
     {
         SpotShadowMap.reset();
         return false;
+    }
+
+    D3D11_TEXTURE2D_DESC PointLightDesc{};
+    PointLightDesc.Width = ShadowMapSize;
+    PointLightDesc.Height = ShadowMapSize;
+    PointLightDesc.MipLevels = 1;
+    PointLightDesc.ArraySize = 6;
+    PointLightDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+    PointLightDesc.SampleDesc.Count = 1;
+    PointLightDesc.Usage = D3D11_USAGE_DEFAULT;
+    PointLightDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+    PointLightDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+
+    PointLightShadowMap = RenderCommand::CreateTextureCube(PointLightDesc, {});
+
+    if (!PointLightShadowMap || !PointLightShadowMap->GetRawPtr() || !PointLightShadowMap->GetFaceDSV(0) || !PointLightShadowMap->GetSRV())
+    {
+        PointLightShadowMap.reset();
+        //return false;
     }
 
     return true;
