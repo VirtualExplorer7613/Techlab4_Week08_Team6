@@ -154,8 +154,12 @@ public:
 
 	void SetLight(const FLightConstants& LightData);
 
-    bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc &Desc, const FMatrix &LightVP, EViewMode ViewMode);
-    void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+    // 광원별 DSV와 Light VP를 받아 공통 Shadow Depth Pass를 실행한다.
+    bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc& Desc, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters = nullptr);
+
+    // Directional Light의 그림자 맵을 렌더링하고 메인 카메라의 ViewCB를 복원한다.
+    void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, float CameraNear, float CameraFar, bool bOrthographic, const EViewMode ViewMode);
+
     void RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
     void RenderPointShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
 
@@ -278,7 +282,9 @@ private:
 
     TUniquePtr<FShadowRenderer> ShadowRenderer;
 
-    void DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, EViewMode ViewMode);
+    // 카메라 RenderQueue와 독립적으로 Scene의 Shadow Caster를 렌더링한다.
+    // Caster 목록이 전달되면 해당 목록을, 없으면 Scene.Proxies를 순회한다.
+    void DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters = nullptr);
 
 	//DepthPrepass 시 잠깐 켜짐, 머테리얼 바인딩을 건너뜀
 	bool bDepthOnly = false;

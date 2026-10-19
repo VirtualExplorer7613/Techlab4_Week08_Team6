@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <limits>
 
 #include "Math/EngineMath.h"
 #include "Math/Box.h"
@@ -33,12 +34,22 @@ public:
     bool BeginShadowPass(const FShadowPassDesc &Desc);
     void EndShadowPass();
 
-    FBox CalculateLightSpaceBounds(const std::array<FVector, 8> &FrustumCornersWorld, const FMatrix &LightView) const;
+    // Frustum 중심과 광원 방향을 기준으로 Light View 행렬을 구성한다.
+    FMatrix BuildDirectionalLightView(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection) const;
 
-    FMatrix BuildDirectionalLightView(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection) const;    
+    // Frustum의 8개 꼭짓점을 Light Space로 변환해 경계 상자를 구한다.
+    FBox CalculateLightSpaceBounds(const std::array<FVector, 8>& FrustumCornersWorld, const FMatrix& LightView) const;
+
+    // Light Space의 X축은 깊이, Y/Z축은 화면 평면으로 사용해 직교투영 행렬을 구성한다.
     FMatrix BuildDirectionalLightProjection(const FBox& LightSpaceBounds) const;
-    FMatrix BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection) const;    
 
+    // 카메라 Frustum을 지정된 그림자 거리까지 제한해 Directional Light VP를 계산한다.
+    FMatrix BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection) const;
+
+    // Frustum 코너 8개를 받아 Directional Light VP를 계산한다.
+    FMatrix BuildDirectionalLightVPFromCorners(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection, float MinCasterDepth = std::numeric_limits<float>::infinity()) const;
+
+    // Frustum의 원거리 꼭짓점을 ShadowDistance에 맞춰 보간한다.
     std::array<FVector, 8> LimitFrustumToShadowDistance(const std::array<FVector, 8>& Corners, float CameraNear, float CameraFar, float ShadowDistance) const;
 
     FMatrix BuildPointLightView(const FVector &LightPosition, uint32 FaceIndex) const;

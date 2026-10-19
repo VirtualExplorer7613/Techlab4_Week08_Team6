@@ -725,7 +725,7 @@ void FRenderer::SetLight(const FLightConstants &InLightData)
 }
 
 
-void FRenderer::DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, EViewMode ViewMode)
+void FRenderer::DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters)
 {
     FViewConstants ViewConstants{};
     ViewConstants.VP = LightVP;
@@ -737,7 +737,9 @@ void FRenderer::DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, E
     bDepthOnly = true;
     RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    for (const FPrimitiveSceneProxy *Proxy : Scene.Proxies)
+    const TArray<FPrimitiveSceneProxy *> &Casters = ShadowCasters ? *ShadowCasters : Scene.Proxies;
+
+    for (const FPrimitiveSceneProxy *Proxy : Casters)
     {
         if (!Proxy || !Proxy->IsVisible() || !Proxy->GetCastShadows())
             continue;
@@ -768,38 +770,84 @@ void FRenderer::DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, E
 }
 
 
-bool FRenderer::RenderShadowDepth(const FScene& Scene, const FShadowPassDesc &Desc, const FMatrix &LightVP, EViewMode ViewMode)
+bool FRenderer::RenderShadowDepth(const FScene& Scene, const FShadowPassDesc& Desc, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters)
 {
     if (!ShadowRenderer || !ShadowRenderer->BeginShadowPass(Desc))
         return false;
 
-    DrawShadowCasters(Scene, LightVP, ViewMode);
+    DrawShadowCasters(Scene, LightVP, ViewMode, ShadowCasters);
 
     ShadowRenderer->EndShadowPass();
     return true;
 }
 
-void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
+void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, float CameraNear, float CameraFar, bool bOrthographic, const EViewMode ViewMode)
 {
     if (LightData.DirectionalLight.ShadowParameters.W <= 0.0f)
         return;
 
-    FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetDirectionalShadowMap() : nullptr;
+    FTexture2D* ShadowMap = ShadowRenderer ? ShadowRenderer->GetDirectionalShadowMap() : nullptr;
     if (!ShadowMap || !ShadowMap->GetDSV())
         return;
 
     // 같은 텍스처를 SRV와 DSV로 동시에 바인딩하지 않도록 해제
     RenderCommand::UnbindShaderResource(10, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
-    const FMatrix &LightVP = LightData.DirectionalLight.ViewProjection;
+    FMatrix LightVP = LightData.DirectionalLight.ViewProjection;
+    TArray<FPrimitiveSceneProxy*> ShadowCasters;
+
+    if (!bOrthographic)
+    {
+        const FVector4& Direction = LightData.DirectionalLight.Direction;
+        const FVector LightDirection(Direction.X, Direction.Y, Direction.Z);
+        const float ShadowDistance = std::min(CameraFar, 40.0f);
+
+        LightVP = ShadowRenderer->BuildDirectionalLightVP(CameraViewProjection, CameraNear, CameraFar, ShadowDistance, LightDirection);
+
+
+        Scene.BVH.Query(
+            [&LightVP](const FBox &WorldBounds) {
+                const FBox ProjectedBounds = WorldBounds.GetWorldAABB(LightVP);
+
+                return ProjectedBounds.Min.X <= 1.0f && ProjectedBounds.Max.X >= -1.0f && ProjectedBounds.Min.Y <= 1.0f &&
+                       ProjectedBounds.Max.Y >= -1.0f;
+            },
+            [&ShadowCasters](FPrimitiveSceneProxy *Proxy) {
+                if (Proxy && Proxy->IsVisible() && Proxy->GetCastShadows() && Proxy->GetMesh() && Proxy->GetRenderState())
+                    ShadowCasters.Add(Proxy);
+            });
+
+        // 그림자를 받을 영역의 Light Space 깊이 범위를 구한다.
+        const auto FrustumCorners = GetFrustumCornersWorld(CameraViewProjection);
+        const auto ShadowCorners = ShadowRenderer->LimitFrustumToShadowDistance(FrustumCorners, CameraNear, CameraFar, ShadowDistance);
+        const FMatrix LightView = ShadowRenderer->BuildDirectionalLightView(ShadowCorners, LightDirection);
+        const FBox ReceiverBounds = ShadowRenderer->CalculateLightSpaceBounds(ShadowCorners, LightView);
+
+        float MinCasterDepth = ReceiverBounds.Min.X;
+
+        // 검색된 Caster 중 광원에 가장 가까운 깊이를 찾는다.
+        for (const FPrimitiveSceneProxy *Proxy : ShadowCasters)
+        {
+            const FAABB &Bounds = Proxy->GetBounds();
+            const FBox WorldBounds{ Bounds.Center - Bounds.Extent, Bounds.Center + Bounds.Extent };
+            const FBox LightBounds = WorldBounds.GetWorldAABB(LightView);
+
+            MinCasterDepth = std::min(MinCasterDepth, LightBounds.Min.X);
+        }
+
+        LightVP = ShadowRenderer->BuildDirectionalLightVPFromCorners(ShadowCorners, LightDirection, MinCasterDepth);
+    }
 
     FShadowPassDesc Desc{};
     Desc.DepthView = ShadowMap->GetDSV();
     Desc.Width = ShadowMap->GetWidth();
     Desc.Height = ShadowMap->GetHeight();
 
-    if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode))
+    if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode, bOrthographic ? nullptr : &ShadowCasters))
         return;
+
+    // Shadow Map 생성과 샘플링에 동일한 Light VP를 사용한다.
+    UploadLightGlobalConstants(LightVP);
 
     // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
     FViewConstants CameraViewConstants{};

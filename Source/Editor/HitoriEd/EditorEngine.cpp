@@ -947,7 +947,9 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	if (Settings.bDrawPrimitives)
 		Renderer->RenderQueueSorting(RenderQueue, ViewProjection, ViewCameraLocation);
 
-    Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+    const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
+
+    Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
     Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
     Renderer->RenderPointShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
 
