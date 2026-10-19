@@ -107,7 +107,7 @@ cbuffer CascadeDebugConstants : register(b5)
 
     float4 CascadeCameraForward;
     float4 CascadeSplitDepths;
-    float4 CascadeBlendStartDepths;
+    float4 CascadeBlendEndDepths;
 
     float CascadeShadowDistance;
     float CascadeInvResolution;
@@ -346,10 +346,13 @@ uint SelectDebugCascade(float3 worldPos)
 {
     // float viewDepth = max(dot(worldPos - CameraLocation, CascadeCameraForward.xyz), 0.0f);
     float viewDepth = max(GetCascadeViewDepth(worldPos), 0.0f);
+
+    float4 selectionDepths = CascadeBlendEnabled != 0 ? CascadeBlendEndDepths : CascadeSplitDepths;
+    
     uint index = 0;
-    index += viewDepth > CascadeSplitDepths.x ? 1u : 0u;
-    index += viewDepth > CascadeSplitDepths.y ? 1u : 0u;
-    index += viewDepth > CascadeSplitDepths.z ? 1u : 0u;
+    index += viewDepth > selectionDepths.x ? 1u : 0u;
+    index += viewDepth > selectionDepths.y ? 1u : 0u;
+    index += viewDepth > selectionDepths.z ? 1u : 0u;
 
     return min(index, max(CascadeCount, 1u) - 1u);
 }
@@ -378,8 +381,8 @@ float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentV
     }
 
     float viewDepth = GetCascadeViewDepth(worldPos);
-    float blendStart = CascadeBlendStartDepths[cascadeIndex];
-    float blendEnd = CascadeSplitDepths[cascadeIndex];
+    float blendStart = CascadeSplitDepths[cascadeIndex];
+    float blendEnd = CascadeBlendEndDepths[cascadeIndex];
 
     // 전환 구간에 들어오지 않았다면 추가 샘플링 생략
     if (blendEnd <= blendStart || viewDepth <= blendStart)

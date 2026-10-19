@@ -120,7 +120,7 @@ struct alignas(16) FCascadeDebugConstants
 
     // 임시 경계값, 월드 단위. W는 사용하지 않는다.
     FVector4 SplitDepths = FVector4(5, 15, 30, 0);
-    FVector4 BlendStartDepths;
+    FVector4 BlendEndDepths;
 
     // 16바이트
     float ShadowDistance = 0.0f;

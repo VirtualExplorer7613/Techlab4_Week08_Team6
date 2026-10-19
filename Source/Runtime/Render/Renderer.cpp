@@ -327,20 +327,36 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
 
             const float SplitFar = Index == Count - 1 ? EndDepth : SplitNear + BaseLength * Weight;
 
-            // 이번 Cascade 끝 깊이를 저장한다.
+            // 이번 Cascade의 기본 경계와 다음 Cascade로 전환할 구간을 계산한다.
             //
-            // 셰이더는 픽셀의 카메라 깊이와 이 경계들을 비교해서
-            // 어느 Cascade 그림자 맵을 사용할지 선택한다.
+            // SplitDepths[Index]    : 확장 전 끝 깊이. 다음 Cascade와의 보간 시작점.
+            // BlendEndDepths[Index] : 확장된 끝 깊이. 다음 Cascade와의 보간 종료점.
             //
             // 예:
-            // SplitDepths[0] = 첫 번째 Cascade 끝
-            // SplitDepths[1] = 두 번째 Cascade 끝
-            // ....
-            CascadeConstants.SplitDepths[Index] = SplitFar;
+            // 기본 범위가 0~100이고 전환 비율이 10% 라면
+            // 현재 맵은 0~110까지 렌더링하고, 100~110에서 다음 맵의 결과와 보간한다.
+            // 
+            // 현재 Cascade 깊이 구간의 10%를 다음 캐스케이드와의 전환 길이로 사용한다.
             constexpr float BlendFraction = 0.1f;
 
-            CascadeConstants.BlendStartDepths[Index] = Index + 1 < Count ? SplitFar - (SplitFar - SplitNear) * BlendFraction : SplitFar;
-            const float RenderNear = Index == 0 ? CameraNear : CascadeConstants.BlendStartDepths[Index - 1];
+            // 다음 Cascade 있으면 전환 길이를 계산한다.
+            // 마지막 Cascade는 다음 맵과 보간하지 않으므로 0으로 설정한다.
+            const float FadeLength = Index + 1 < Count ? (SplitFar - SplitNear) * BlendFraction : 0.0f;
+
+            // 렌더링 시작 깊이는 원래 구간의 시작을 유지한다.
+            const float RenderNear = SplitNear;
+
+            // 끝 깊이를 전환 길이만큼 확장하여 다음 캐스케이드와 겹치는 구간을 만든다.
+            // 전체 그림자 거리인 EndDepth를 넘지 않도록 제한한다.
+            const float RenderFar = std::min(SplitFar + FadeLength, EndDepth);
+
+            // 원래 끝 깊이를 보간 시작점으로 저장한다.
+            CascadeConstants.SplitDepths[Index] = SplitFar;
+
+            // 확장된 끝 깊이를 보간 종료점으로 저장한다.
+            // 셰이더는 SplitDepths[Index] ~ BlendEndDepths[Index] 구간에서
+            // 현재 맵과 다음 맵의 결과를 섞는다.
+            CascadeConstants.BlendEndDepths[Index] = RenderFar;
 
 
             // ───────────────────────
@@ -355,13 +371,19 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
             // 예:
             // CameraNear = 1, CameraFar = 101
             // SplitNear  = 11, SplitFar = 31
-            //
+            // 
+            // 전환 길이가 구간 길이의 10%라면:
+            // FadeLength = (31 - 11) * 0.1 = 2
+            // RenderNear = 11
+            // RenderFar = 33(EndDepth에 의해 제한되지 않는 경우)
+            // 
             // NearRatio = (11 - 1) / (101 - 1) = 0.1
-            // FarRatio  = (31 - 1) / (101 - 1) = 0.3
+            // FarRatio  = (33 - 1) / (101 - 1) = 0.32
+            // 이 비율로 카메라 프러스텀의 Near~Far 꼭짓점 사이를 보간하여,
+            // 이번 Cascade를 렌더링할 프러스텀 꼭짓점을 구한다.
 
-            //const float NearRatio = (SplitNear - CameraNear) / (CameraFar - CameraNear);
             const float NearRatio = (RenderNear - CameraNear) / (CameraFar - CameraNear);
-            const float FarRatio = (SplitFar - CameraNear) / (CameraFar - CameraNear);
+            const float FarRatio = (RenderFar - CameraNear) / (CameraFar - CameraNear);
 
             // 이번 Cascade 프러스텀 꼭짓점 8개를 저장한다.
             //
