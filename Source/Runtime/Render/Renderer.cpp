@@ -256,9 +256,9 @@ void FRenderer::UpdateCascadeDebugConstants(const FVector &CameraForward)
 {
     FCascadeDebugConstants Constants{};
 
-    const float DistributionExponent = 2.0f; // E. 1이면 균등 분할
-    const float StartDepth = 0.0f;
-    const float EndDepth = 75.0f; // 분할할 전체 깊이 범위
+    const float DistributionExponent = 3.0f; // E. 1이면 균등 분할
+    const float StartDepth = 0.1f; // 카메라 Near
+    const float EndDepth = 400.0f; // CSM 최대 거리(언리얼 참고함)
 
     const float E = DistributionExponent;
     const float E2 = E * E;
