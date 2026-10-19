@@ -283,6 +283,34 @@ void FViewportsPanel::OnRender()
 			{
 				ViewportAdapter->SetViewMode(ViewIndex, static_cast<EViewMode>(Mode));
 			}
+
+			PlaceToolbarItem(ButtonWidth("Show") + ImGui::GetFrameHeight());
+			if (ImGui::BeginCombo("##ShowFlags", "Show", ImGuiComboFlags_HeightLargest))
+			{
+				const struct
+				{
+					const char* Label;
+					EShowFlags Flag;
+				} ShowItems[] =
+				{
+					{"Primitives", EShowFlags::Primitives},
+					{"Bounding Box", EShowFlags::BoundingBox},
+					{"Object UUID", EShowFlags::UUID},
+					{"Batch Line / Grid", EShowFlags::BatchLine},
+					{"PS Grid", EShowFlags::PSGrid},
+					{"Exponential Height Fog", EShowFlags::ExponentialHeightFog},
+					{"Shadows", EShowFlags::Shadows}
+				};
+				for (const auto& Item : ShowItems)
+				{
+					bool bEnabled = ViewportAdapter->IsShowFlagEnabled(ViewIndex, Item.Flag);
+					if (ImGui::Checkbox(Item.Label, &bEnabled))
+					{
+						ViewportAdapter->SetShowFlag(ViewIndex, Item.Flag, bEnabled);
+					}
+				}
+				ImGui::EndCombo();
+			}
 		}
 		if (CurrentLayoutMode == ELayoutMode::QuadSplit)
 		{

@@ -4,22 +4,10 @@
 #include "Editor/EditorUI/EditorPanel.h"
 #include "Math/Quat.h"
 #include "Math/Vector.h"
+#include "Render/ShowFlags.h"
 
 class FMultipleViewportsAdapter;
 class UWorld;
-
-enum class EShowFlags : uint32
-{
-    None = 0,
-    Primitives = 1 << 0,
-    BoundingBox = 1 << 1,
-    UUID = 1 << 2,
-    BatchLine = 1 << 3,
-    PSGrid = 1 << 4,
-    ExponentialHeightFog = 1 << 5,
-    Shadows = 1 << 6,
-};
-DEFINE_ENUM_OPERATORS(EShowFlags)
 
 struct FEditorSettings
 {
@@ -37,12 +25,18 @@ struct FEditorSettings
 	float MultipleViewportsVertical = 0.5f;
 	bool bMultipleViewportsSingle = false;
 	int32 MultipleViewportsSingleViewIndex = 0;
+
     // 미저장 표식은 초기 카메라 값을 유지한다. 위치·회전은 저장하지 않는다.
     float ViewFov[4]{};
     float ViewOrthoWidth[4]{};
     int32 ViewPreset[4]{-1,-1,-1,-1};
+
     // EViewMode 정수값. -1이면 미저장이라 기본값을 쓴다.
     int32 ViewMode[4]{-1,-1,-1,-1};
+
+    // ShowFlag 저장용 스냅샷. -1이면 미저장이고 실행 중 상태는 Adapter가 소유한다.
+    int64 ViewShowFlags[4]{-1,-1,-1,-1};
+
     // View별 카메라 Transform은 Quaternion 그대로 저장해 재실행 후 같은 시점을 복원한다.
     // 구형 editor.ini에 키가 없으면 Saved가 false로 남아 Adapter의 초기 Transform을 유지한다.
     FVector ViewLocation[4]{};
@@ -62,10 +56,6 @@ public:
 	void Tick(float DeltaTime)override;
 	void OnRender() override;
 	const char* GetPanelName() const override { return "Settings"; }
-
-    EShowFlags GetFlags() const { return Flags; }
-    bool IsEnabled(EShowFlags Flag) const { return HasFlag(Flags, Flag); }
-    bool IsAnyEnabled() const { return Flags != EShowFlags::None; }
 
 	void SetWorld(UWorld* InWorld) { World = InWorld; }
 
@@ -89,9 +79,6 @@ public:
 private:
 	static constexpr float SectionGap = 10.0f;
 	static constexpr float SubsectionGap = 4.0f;
-
-    EShowFlags Flags = EShowFlags::Primitives | EShowFlags::BatchLine | EShowFlags::ExponentialHeightFog | EShowFlags::Shadows;
-    void SetFlag(EShowFlags Flag, bool bEnabled) { Flags = bEnabled ? (Flags | Flag) : (Flags & ~Flag); }
 
     // View별 Transform·투영·표시 설정을 읽어 저장용 스냅샷에 반영한다.
     void ReadViewportSettings(FEditorSettings& Out) const;

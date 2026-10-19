@@ -6,6 +6,8 @@
 
 #include "Engine/World.h"
 
+#include <limits>
+
 // 종료 시 렌더·에디터·뷰포트 설정을 함께 저장한다.
 FSettingsPanel::~FSettingsPanel()
 {
@@ -38,29 +40,14 @@ void FSettingsPanel::OnRender()
 	// 렌더링 옵션 (Toggles)
 	ImGui::SeparatorText("Rendering");
 
-	const auto DrawShowFlag = [this](const char* Label, EShowFlags Flag)
-	{
-		bool bEnabled = HasFlag(Flags, Flag);
-		if (ImGui::Checkbox(Label, &bEnabled))
-			SetFlag(Flag, bEnabled);
-	};
-
 	ImGui::TextDisabled("Fill mode is configured per viewport.");
-	DrawShowFlag("Draw Primitives", EShowFlags::Primitives);
-	DrawShowFlag("Draw Bounding Box", EShowFlags::BoundingBox);
-	DrawShowFlag("Show Object UUID", EShowFlags::UUID);
 	ImGui::Checkbox("FXAA", &Settings.bEnableFXAA);
-    DrawShowFlag("Show Shadows", EShowFlags::Shadows);
 	ImGui::Checkbox("Depth View", &Settings.bDepthView);
 	ImGui::Checkbox("Tile-Based Light Culling", &Settings.bTileBasedLightCulling);
-	DrawShowFlag("Exponential Height Fog", EShowFlags::ExponentialHeightFog);
 	//////////////////////////////////////////////////////////
 
 	ImGui::Dummy(ImVec2(0.0f, SectionGap));
 	ImGui::SeparatorText("Grid");
-
-	DrawShowFlag("Draw Batch Line / Grid", EShowFlags::BatchLine);
-	DrawShowFlag("Draw PS Grid", EShowFlags::PSGrid);
 
 	ImGui::SetNextItemWidth(200.0f);
 	ImGui::SliderInt("Grid Spacing", &Settings.GridSpacing, 1, 100);
@@ -121,13 +108,6 @@ bool FSettingsPanel::SaveSettings() const
 	}
 
 	File << "[Rendering]\n";
-	File << "DrawPrimitives=" << HasFlag(Flags, EShowFlags::Primitives) << "\n";
-	File << "DrawBoundingBox=" << HasFlag(Flags, EShowFlags::BoundingBox) << "\n";
-	File << "ShowUUID=" << HasFlag(Flags, EShowFlags::UUID) << "\n";
-	File << "DrawBatchLine=" << HasFlag(Flags, EShowFlags::BatchLine) << "\n";
-	File << "DrawPSGrid=" << HasFlag(Flags, EShowFlags::PSGrid) << "\n";
-	File << "ExponentialHeightFog=" << HasFlag(Flags, EShowFlags::ExponentialHeightFog) << "\n";
-	File << "ShowShadows=" << HasFlag(Flags, EShowFlags::Shadows) << "\n";
 	File << "EnableFXAA=" << Settings.bEnableFXAA << "\n";
 	File << "\n";
 
@@ -149,6 +129,9 @@ bool FSettingsPanel::SaveSettings() const
         File << "View" << Index << "OrthoWidth=" << Snapshot.ViewOrthoWidth[Index] << "\n";
         File << "View" << Index << "Preset=" << Snapshot.ViewPreset[Index] << "\n";
         File << "View" << Index << "ViewMode=" << Snapshot.ViewMode[Index] << "\n";
+        const EShowFlags Flags = Snapshot.ViewShowFlags[Index] >= 0
+            ? static_cast<EShowFlags>(Snapshot.ViewShowFlags[Index]) : FMultipleViewportsAdapter::DefaultShowFlags;
+        File << "View" << Index << "ShowFlags=" << static_cast<uint32>(Flags) << "\n";
         File << "View" << Index << "LocationX=" << Snapshot.ViewLocation[Index].X << "\n";
         File << "View" << Index << "LocationY=" << Snapshot.ViewLocation[Index].Y << "\n";
         File << "View" << Index << "LocationZ=" << Snapshot.ViewLocation[Index].Z << "\n";
@@ -172,10 +155,12 @@ bool FSettingsPanel::LoadSettings()
 
 	uint8 LocationComponentMasks[4]{};
 	uint8 RotationComponentMasks[4]{};
+	EShowFlags LegacyShowFlags = FMultipleViewportsAdapter::DefaultShowFlags;
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
 		Settings.bViewLocationSaved[Index] = false;
 		Settings.bViewRotationSaved[Index] = false;
+		Settings.ViewShowFlags[Index] = -1;
 	}
 
 	std::string Line;
@@ -195,6 +180,17 @@ bool FSettingsPanel::LoadSettings()
                 {
                     FString Prefix = "View";
                     Prefix += static_cast<char>('0' + Index);
+                    if (Key == Prefix + "ShowFlags")
+                    {
+                        std::istringstream FlagNumber(ValueStr);
+                        int64 Value = -1;
+                        if ((FlagNumber >> Value) && Value >= 0 && Value <= std::numeric_limits<uint32>::max() &&
+                            (FlagNumber >> std::ws).eof())
+                        {
+                            Settings.ViewShowFlags[Index] = Value;
+                        }
+                        continue;
+                    }
                     std::istringstream Number(ValueStr);
                     float Value = 0;
                     if (!(Number >> Value) || !std::isfinite(Value)) continue;
@@ -243,13 +239,18 @@ bool FSettingsPanel::LoadSettings()
                         RotationComponentMasks[Index] |= 1 << 3;
                     }
                 }
-                if (Key == "DrawPrimitives") SetFlag(EShowFlags::Primitives, std::stoi(ValueStr) != 0);
-				else if (Key == "DrawBoundingBox") SetFlag(EShowFlags::BoundingBox, std::stoi(ValueStr) != 0);
-				else if (Key == "ShowUUID") SetFlag(EShowFlags::UUID, std::stoi(ValueStr) != 0);
-				else if (Key == "DrawBatchLine") SetFlag(EShowFlags::BatchLine, std::stoi(ValueStr) != 0);
-				else if (Key == "DrawPSGrid") SetFlag(EShowFlags::PSGrid, std::stoi(ValueStr) != 0);
-				else if (Key == "ExponentialHeightFog") SetFlag(EShowFlags::ExponentialHeightFog, std::stoi(ValueStr) != 0);
-				else if (Key == "ShowShadows") SetFlag(EShowFlags::Shadows, std::stoi(ValueStr) != 0);
+				EShowFlags LegacyFlag = EShowFlags::None;
+                if (Key == "DrawPrimitives") LegacyFlag = EShowFlags::Primitives;
+				else if (Key == "DrawBoundingBox") LegacyFlag = EShowFlags::BoundingBox;
+				else if (Key == "ShowUUID") LegacyFlag = EShowFlags::UUID;
+				else if (Key == "DrawBatchLine") LegacyFlag = EShowFlags::BatchLine;
+				else if (Key == "DrawPSGrid") LegacyFlag = EShowFlags::PSGrid;
+				else if (Key == "ExponentialHeightFog") LegacyFlag = EShowFlags::ExponentialHeightFog;
+				else if (Key == "ShowShadows") LegacyFlag = EShowFlags::Shadows;
+				if (LegacyFlag != EShowFlags::None)
+				{
+					LegacyShowFlags = std::stoi(ValueStr) != 0 ? (LegacyShowFlags | LegacyFlag) : (LegacyShowFlags & ~LegacyFlag);
+				}
 				else if (Key == "EnableFXAA") Settings.bEnableFXAA = std::stoi(ValueStr);
 
 				else if (Key == "CameraMoveSpeed") Settings.CameraSpeed = std::stof(ValueStr);
@@ -270,6 +271,9 @@ bool FSettingsPanel::LoadSettings()
 	File.close();
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
+		// 새 View 값이 있으면 파일 내 공통 키의 순서와 무관하게 우선한다.
+		if (Settings.ViewShowFlags[Index] < 0)
+			Settings.ViewShowFlags[Index] = static_cast<uint32>(LegacyShowFlags);
 		Settings.bViewLocationSaved[Index] = LocationComponentMasks[Index] == 0x7;
 		if (RotationComponentMasks[Index] == 0xF)
 		{
@@ -310,6 +314,7 @@ void FSettingsPanel::ReadViewportSettings(FEditorSettings& Out) const
         Out.ViewOrthoWidth[Index] = Camera.Projection.OrthoWidth;
         Out.ViewPreset[Index] = static_cast<int32>(ViewportAdapter->GetCameraPreset(Index));
         Out.ViewMode[Index] = static_cast<int32>(ViewportAdapter->GetViewMode(Index));
+        Out.ViewShowFlags[Index] = static_cast<uint32>(ViewportAdapter->GetShowFlags(Index));
         Out.ViewLocation[Index] = Camera.Transform.Location;
         Out.ViewRotation[Index] = Camera.Transform.Rotation;
         Out.bViewLocationSaved[Index] = true;
@@ -341,5 +346,9 @@ void FSettingsPanel::ApplyViewportSettings()
         if (Settings.ViewMode[Index] >= 0)
             Mode = static_cast<EViewMode>(Settings.ViewMode[Index]);
         ViewportAdapter->SetViewMode(Index, Mode);
+        const EShowFlags Flags = Settings.ViewShowFlags[Index] >= 0
+            ? static_cast<EShowFlags>(Settings.ViewShowFlags[Index]) : FMultipleViewportsAdapter::DefaultShowFlags;
+        ViewportAdapter->SetShowFlag(Index, ViewportAdapter->GetShowFlags(Index), false);
+        ViewportAdapter->SetShowFlag(Index, Flags, true);
     }
 }
