@@ -59,8 +59,9 @@ struct alignas(16) FPointLight
 	FVector4 ColorIntensity = FVector4(0, 0, 0, 0); // rgb: 색상, w: 강도
 	FVector4 FalloffEnabled = FVector4(1, 0, 0, 0); // x: 반경 감쇠, y: 사용 여부, zw: 패딩
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
 };
-static_assert(sizeof(FPointLight) == 64, "FPointLight must be 64 bytes");
+static_assert(sizeof(FPointLight) == 80, "FPointLight must be 80 bytes");
 
 struct alignas(16) FSpotLight
 {
@@ -71,8 +72,9 @@ struct alignas(16) FSpotLight
 	FVector4 ForwardVector = FVector4(1, 0, 0, 0);		// xyz : 전방벡터
     FMatrix ViewProjection;                            // ViewProjection 행렬. 그림자 맵을 만들 때 사용
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
 };
-static_assert(sizeof(FSpotLight) == 160, "FSpotLight must be 80 bytes");
+static_assert(sizeof(FSpotLight) == 176, "FSpotLight must be 176 bytes");
 
 struct alignas(16) FAmbientLight
 {
@@ -85,8 +87,10 @@ struct alignas(16) FDirectionalLight
 	FVector4 Direction;		 // xyz : 광선 방향(World)
 	FMatrix ViewProjection;	 // ViewProjection 행렬. 그림자 맵을 만들 때 사용
 	FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
 };
 
+static_assert(sizeof(FDirectionalLight) == 128, "FDirectionalLight must be 128 bytes");
 
 // Scene이 채우는 CPU 쪽 라이트 묶음. 로컬 라이트 배열은 StructuredBuffer로, 나머지는 FLightGlobalConstants로 올라간다.
 struct alignas(16) FLightConstants
@@ -97,7 +101,7 @@ struct alignas(16) FLightConstants
 	FDirectionalLight	DirectionalLight;
 	uint32 PointLightCount = 0;
 	uint32 SpotLightCount = 0;
-	uint32 Padding[2] = {};
+	uint32 Padding = 0;
 };
 
 // UberLit의 LightConstants(b3)와 같은 레이아웃. 로컬 라이트 배열은 빠져 있다.
@@ -107,9 +111,10 @@ struct alignas(16) FLightGlobalConstants
 	FDirectionalLight	DirectionalLight;
 	uint32 PointLightCount = 0;
 	uint32 SpotLightCount = 0;
-	uint32 Padding[2] = {};
+    uint32 ShadowQuality = 0;
+	uint32 Padding = 0;
 };
-static_assert(sizeof(FLightGlobalConstants) == 144, "FLightGlobalConstants must match UberLit LightConstants");
+static_assert(sizeof(FLightGlobalConstants) == 160, "FLightGlobalConstants must match UberLit LightConstants");
 
 class FRenderer
 {
@@ -153,6 +158,7 @@ public:
     void UploadLightGlobalConstants(const FMatrix &DirectionalLightVP);
 
 	void SetLight(const FLightConstants& LightData);
+    void SetShadowQuality(const uint32 &InShadowQuality){ ShadowQuality = InShadowQuality; }
 
     // 광원별 DSV와 Light VP를 받아 공통 Shadow Depth Pass를 실행한다.
     bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc& Desc, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters = nullptr);
@@ -273,6 +279,8 @@ private:
 
 	TUniquePtr<FConstantBuffer> LightCB;
 	FLightConstants LightData{};
+
+    uint32 ShadowQuality = 0;
 
 	//CS, PS가 읽는 동적 StructuredBuffer
 	ComPtr<ID3D11Buffer> PointLightBuffer;

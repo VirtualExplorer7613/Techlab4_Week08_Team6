@@ -46,6 +46,16 @@ void FSettingsPanel::OnRender()
 	ImGui::Checkbox("Depth View", &Settings.bDepthView);
 	ImGui::Checkbox("Tile-Based Light Culling", &Settings.bTileBasedLightCulling);
 	ImGui::Checkbox("Exponential Height Fog", &Settings.bExponentialHeightFog);
+
+    static const char *QualityLabels[] = {"Hard", "Gather 1x1", "Gather 3x3", "Gather 5x5", "Box 3x3"};
+    // UberLut.hlsl SHADOW_QUALITY랑 동일하게 
+
+    int Quality = static_cast<int>(Settings.ShadowQuality);
+    ImGui::SetNextItemWidth(200.0f);
+    if (ImGui::Combo("Shadow Quality", &Quality, QualityLabels, IM_ARRAYSIZE(QualityLabels)))
+    {
+        Settings.ShadowQuality = Quality;
+    }
 	//////////////////////////////////////////////////////////
 
 	ImGui::Dummy(ImVec2(0.0f, SectionGap));
@@ -120,6 +130,7 @@ bool FSettingsPanel::SaveSettings() const
 	File << "DrawBatchLine=" << Settings.bDrawBatchLine << "\n";
 	File << "DrawPSGrid=" << Settings.bDrawPSGrid << "\n";
 	File << "EnableFXAA=" << Settings.bEnableFXAA << "\n";
+    File << "ShadowQuality=" << Settings.ShadowQuality << "\n";
 	File << "\n";
 
 	File << "[Editor]\n";
@@ -244,6 +255,7 @@ bool FSettingsPanel::LoadSettings()
 				else if (Key == "DrawBatchLine") Settings.bDrawBatchLine = std::stoi(ValueStr);
 				else if (Key == "DrawPSGrid") Settings.bDrawPSGrid = std::stoi(ValueStr);
 				else if (Key == "EnableFXAA") Settings.bEnableFXAA = std::stoi(ValueStr);
+                else if (Key == "ShadowQuality") Settings.ShadowQuality = std::stoi(ValueStr);
 
 				else if (Key == "CameraMoveSpeed") Settings.CameraSpeed = std::stof(ValueStr);
 				else if (Key == "CameraRotateSensitivity") Settings.MouseSensitivity = std::stof(ValueStr);

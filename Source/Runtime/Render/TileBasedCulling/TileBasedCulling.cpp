@@ -21,7 +21,8 @@ struct FPointLightInfo
     float4 PositionRadius;
     float4 ColorIntensity;
     float4 FalloffEnabled;
-    float4 ShadowParameters;
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
 };
 
 struct FSpotLightInfo
@@ -32,7 +33,8 @@ struct FSpotLightInfo
     float4 OutAngleInvCosDiff;
     float4 FowardVector;
     matrix ViewProjection;
-    float4 ShadowParameters;
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
 };
 
 //Tile Culling에 필요한 상수 버퍼

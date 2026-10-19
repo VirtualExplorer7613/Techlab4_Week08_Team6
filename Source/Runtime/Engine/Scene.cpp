@@ -284,6 +284,13 @@ void FScene::UpdatePointLight(FLightConstants &LightConstants,
                                        1.f / static_cast<float>(LightComponent->GetShadowMapWidth()),
                                        LightComponent->GetCastShadows() ? 1.f : 0.f);
 
+  PointData.ShadowFilterParameters = FVector4(
+      std::max<float>(LightComponent->GetShadowSharpen(), 0.001f),
+      std::max<float>(1, 0.001f), // TransitionSize로 나중에 바꿔야됨
+      0,
+      0
+  );
+
   LightConstants.PointLights[LightConstants.PointLightCount] = PointData;
   LightConstants.PointLightCount++;
 }
@@ -343,6 +350,13 @@ void FScene::UpdateSpotLight(FLightConstants &LightConstants,
                                               std::max<float>(LightComponent->GetShadowSlopeBias(), 0.001f),
                                               1.f / static_cast<float>(LightComponent->GetShadowMapWidth()),
                                               LightComponent->GetCastShadows() ? 1.f : 0.f);
+
+  SpotData.ShadowFilterParameters = FVector4(
+      std::max<float>(LightComponent->GetShadowSharpen(), 0.001f),
+      std::max<float>(1, 0.001f), // TransitionSize로 나중에 바꿔야됨
+      0,
+      0
+  );
 
   LightConstants.SpotLights[LightConstants.SpotLightCount] = SpotData;
   LightConstants.SpotLightCount++;
@@ -412,6 +426,13 @@ void FScene::UpdateDirectionalLight(
 	  std::max<float>(LightComponent->GetShadowSlopeBias(), 0.001f),
 	  1.f / static_cast<float>(LightComponent->GetShadowMapWidth()),
 	  LightComponent->GetCastShadows() ? 1.f : 0.f);
+
+  DirectionalData.ShadowFilterParameters = FVector4(
+      std::max<float>(LightComponent->GetShadowSharpen(), 0.001f),
+      std::max<float>(1, 0.001f), // TransitionSize로 나중에 바꿔야됨
+      0,
+      0
+  );
 
   // TODO : 우선순위 도입하기
   LightConstants.DirectionalLight = DirectionalData;

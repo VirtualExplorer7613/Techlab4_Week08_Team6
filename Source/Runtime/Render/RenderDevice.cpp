@@ -335,5 +335,21 @@ void FRenderDevice::CreateStates()
 		Desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
 
 		Device->CreateSamplerState(&Desc, SamplerStates[(uint8)ESamplerState::LinearWrap].GetAddressOf());
+
+        
+		Desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+        Desc.AddressU = D3D11_TEXTURE_ADDRESS_BORDER;
+        Desc.AddressV = D3D11_TEXTURE_ADDRESS_BORDER;
+        Desc.AddressW = D3D11_TEXTURE_ADDRESS_BORDER;
+
+        for (int i = 0; i < 4; i++)
+            Desc.BorderColor[i] = 1.0f;
+
+        Device->CreateSamplerState(&Desc, SamplerStates[(uint8)ESamplerState::PointBorder].GetAddressOf());
+
+        Desc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+        Desc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
+
+        Device->CreateSamplerState(&Desc, SamplerStates[(uint8)ESamplerState::LinearComparison].GetAddressOf());
 	}
 }
