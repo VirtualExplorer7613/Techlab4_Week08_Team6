@@ -35,12 +35,14 @@ void FTextureCube::CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC&
 {
 	HRESULT hr;
 
+    const bool bTypelessDepth = (InDesc.Format == DXGI_FORMAT_R24G8_TYPELESS || InDesc.Format == DXGI_FORMAT_R32_TYPELESS);
+
 	if (InDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE)
 	{
 		// 기본 SRV는 큐브 전체. 차원을 명시하지 않으면 Texture2DArray로 잡혀서
 		// 셰이더의 TextureCube와 어긋난다.
 		D3D11_SHADER_RESOURCE_VIEW_DESC SrvDesc{};
-		SrvDesc.Format = InDesc.Format;
+		SrvDesc.Format = bTypelessDepth ? DXGI_FORMAT_R24_UNORM_X8_TYPELESS : InDesc.Format;
 		SrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
 		SrvDesc.TextureCube.MostDetailedMip = 0;
 		SrvDesc.TextureCube.MipLevels = InDesc.MipLevels;
@@ -67,4 +69,22 @@ void FTextureCube::CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC&
 				HTR_LOG(Error, "[TextureCube] CreateRenderTargetView failed (face={}, hr=0x{:08X})", Face, (uint32)hr);
 		}
 	}
+
+    if (InDesc.BindFlags & D3D11_BIND_DEPTH_STENCIL)
+    {
+        // 면마다 DSV를 하나씩. 배열 슬라이스 하나만 보는 뷰다.
+        for (uint32 Face = 0; Face < FaceCount; ++Face)
+        {
+            D3D11_DEPTH_STENCIL_VIEW_DESC DsvDesc{};
+            DsvDesc.Format = bTypelessDepth ? DXGI_FORMAT_D24_UNORM_S8_UINT : InDesc.Format;
+            DsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
+            DsvDesc.Texture2DArray.MipSlice = 0;
+            DsvDesc.Texture2DArray.FirstArraySlice = Face;
+            DsvDesc.Texture2DArray.ArraySize = 1;
+
+            hr = Device->CreateDepthStencilView(Texture.Get(), &DsvDesc, FaceDSVs[Face].GetAddressOf());
+            if (FAILED(hr))
+                HTR_LOG(Error, "[TextureCube] CreateDepthStencilView failed (face={}, hr=0x{:08X})", Face, (uint32)hr);
+        }
+    }
 }

@@ -279,6 +279,11 @@ void FScene::UpdatePointLight(FLightConstants &LightConstants,
       std::max<float>(LightComponent->GeLightFalloffExponent(), 0.001f), 1.0f,
       0.0f, 0.0f);
 
+  PointData.ShadowParameters = FVector4(std::max<float>(LightComponent->GetShadowDepthBias(), 0.001f),
+                                       std::max<float>(LightComponent->GetShadowSlopeBias(), 0.001f),
+                                       1.f / static_cast<float>(LightComponent->GetShadowMapWidth()),
+                                       LightComponent->GetCastShadows() ? 1.f : 0.f);
+
   LightConstants.PointLights[LightConstants.PointLightCount] = PointData;
   LightConstants.PointLightCount++;
 }

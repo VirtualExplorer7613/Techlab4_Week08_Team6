@@ -204,6 +204,26 @@ void RenderCommand::BindShaderResource(uint32 Slot, UTexture2D* Texture2D, EShad
 	BindShaderResource(Slot, Resource, FlagBits);
 }
 
+void RenderCommand::BindShaderResource(uint32 Slot, FTextureCube *TextureCube, EShaderBindFlagBits FlagBits)
+{
+    if (!TextureCube)
+    {
+        UnbindShaderResource(Slot, FlagBits);
+        return;
+    }
+
+    ID3D11ShaderResourceView *SRV = TextureCube->GetSRV();
+    if (HasFlag(FlagBits, EShaderBindFlagBits::Vertex))
+    {
+        RenderDevice->GetContext()->VSSetShaderResources(Slot, 1, &SRV);
+    }
+
+    if (HasFlag(FlagBits, EShaderBindFlagBits::Pixel))
+    {
+        RenderDevice->GetContext()->PSSetShaderResources(Slot, 1, &SRV);
+    }
+}
+
 void RenderCommand::UnbindShaderResource(uint32 Slot, EShaderBindFlagBits FlagBits)
 {
 	ID3D11ShaderResourceView* NullSRV = nullptr;

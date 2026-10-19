@@ -949,6 +949,7 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 
     Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
     Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+    Renderer->RenderPointShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
 
 	if (bPrepass)
 	{

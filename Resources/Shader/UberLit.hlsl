@@ -41,7 +41,7 @@ struct FPointLightInfo
     float4 PositionRadius;
     float4 ColorIntensity;
     float4 FalloffEnabled;
-    float4 ShadowParameters; // C++ FPointLight와 크기(64바이트)를 맞춘다
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
 };
 
 struct FSpotLightInfo
@@ -52,7 +52,7 @@ struct FSpotLightInfo
     float4 OutAngleInvCosDiff;
     float4 FowardVector;
     matrix ViewProjection;
-    float4 ShadowParameters;
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
 };
 
 struct FAmbientLightInfo
@@ -85,6 +85,7 @@ StructuredBuffer<FSpotLightInfo> SpotLights : register(t9);
 
 Texture2D<float> DirectionalShadowMap : register(t10);
 Texture2D<float> SpotShadowMap : register(t11);
+TextureCube<float> PointShadowMap : register(t12);
 
 cbuffer TileBasedCullingConstants : register(b4)
 {
@@ -157,7 +158,40 @@ FLightResult BlinnPhong(float3 N, float3 L, float3 V, float3 Radiance)
     return Result;
 }
 
-FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 normal, float3 viewDir)
+float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint index)
+{
+    // TODO : 여러개 지원 해야함
+    if (index != 0 || PointLights[0].ShadowParameters.w == 0 || bReceiveShadow == 0)
+    {
+        return 1.0f;
+    }
+
+    float3 lightToPixel = worldPos - lightPos;    
+    if (length(lightToPixel) > PointLights[0].PositionRadius.w)
+    {
+        return 1.0f;
+    }
+
+    float near = 0.1f;
+    float far = PointLights[0].PositionRadius.w;
+    float viewDepth = max(abs(lightToPixel.x), max(abs(lightToPixel.y), abs(lightToPixel.z)));
+    float projDepth = far / (far - near) - (near * far) / ((far - near) * viewDepth);
+
+    float NdotL = saturate(dot(normal, -normalize(lightToPixel).xyz));
+    float2 texelSize = float2(PointLights[0].ShadowParameters.z, PointLights[0].ShadowParameters.z);
+
+    float bias = PointLights[0].ShadowParameters.x + PointLights[0].ShadowParameters.y * (1.0f - NdotL);
+    
+    float visibility = 0.0f;
+
+    // Did not PCF
+    float depth = PointShadowMap.SampleLevel(g_SampleShadow, lightToPixel, 0);
+    visibility += (projDepth - bias) <= depth ? 1.0f : 0.0f;
+    
+    return visibility;
+}
+
+FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
 {
     float4 PositionRadius = info.PositionRadius;
     float4 ColorIntensity = info.ColorIntensity;
@@ -172,13 +206,21 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
     float falloff = pow(Basefalloff, max(FalloffEnabled.x, 0.001f));
 
     float enabled = FalloffEnabled.y;
-    float3 radiance = ColorIntensity.rgb * ColorIntensity.w * falloff * enabled;
+    float3 radiance = ColorIntensity.rgb * ColorIntensity.w * falloff * enabled;    
 
-    return BlinnPhong(normal, lightDir, viewDir, radiance);
+    FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
+
+    float Shadow = CalculatePointShadow(worldPos, info.PositionRadius.xyz, normal, index);
+
+    Result.Diffuse *= Shadow;
+    Result.Specular *= Shadow;
+    
+    return Result;
 }
 
 float CalculateSpotShadow(float3 worldPos, float3 normal, uint index)
 {
+    // TODO : 여러개 지원 해야함
     if (index != 0)
     {
         return 1;
@@ -341,7 +383,7 @@ FLightResult CalculateLightingTiled(float2 PixelPos, float3 worldPos, float3 nor
         }
         else
         {
-            Light = CalculatePointLight(PointLights[Id], worldPos, normal, viewDir);
+            Light = CalculatePointLight(PointLights[Id], worldPos, normal, viewDir, Id);
         }
         Total.Diffuse += Light.Diffuse;
         Total.Specular += Light.Specular;
@@ -362,7 +404,7 @@ FLightResult CalculateLighting(float3 worldPos, float3 normal, float3 viewDir)
     //PointLight
     for (uint i = 0; i < PointLightCount; ++i)
     {
-        FLightResult Light = CalculatePointLight(PointLights[i], worldPos, normal, viewDir);
+        FLightResult Light = CalculatePointLight(PointLights[i], worldPos, normal, viewDir, i);
         Total.Diffuse += Light.Diffuse;
         Total.Specular += Light.Specular;
     }
