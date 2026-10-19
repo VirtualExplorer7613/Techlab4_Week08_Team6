@@ -925,3 +925,140 @@ void FRenderer::RenderPointShadowMap(const FScene &Scene, const FMatrix &CameraV
     CameraViewConstants.CameraPosition = CameraLocation;
     RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
 }
+
+void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
+{
+    FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetShadowMapAtlas() : nullptr;
+    if (!ShadowMap || !ShadowMap->GetDSV())
+    {
+        return;
+    }
+
+    RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // SpotLight Buffer
+    RenderCommand::UnbindShaderResource(12, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // PointLight Buffer
+
+    ShadowRenderer->GetShadowAtlasAllocator().Reset();
+
+    FShadowPassDesc Desc{};
+    Desc.DepthView = ShadowMap->GetDSV();
+    Desc.Width = ShadowMap->GetWidth();
+    Desc.Height = ShadowMap->GetHeight();
+
+    ShadowRenderer->BeginShadowPass(Desc);
+
+    // PointLight Loop
+    uint32 PointLightCount = LightData.PointLightCount;
+    for (uint32 i = 0; i < PointLightCount; i++)
+    {
+        if( LightData.PointLights[i].ShadowParameters.W == 0.0f )
+        {
+            continue;
+        }
+
+        FVector LightPosition = { LightData.PointLights[i].PositionRadius.X, LightData.PointLights[i].PositionRadius.Y, LightData.PointLights[i].PositionRadius.Z };
+        float LightDistance = (LightPosition - CameraLocation).Length();
+
+        float Ratio = (LightData.PointLights[i].PositionRadius.W) / FMath::Max(LightDistance, 1.0f);
+        uint32 RequestSize = 0;
+
+        if( Ratio > 0.5f )
+        {
+            RequestSize = SHADOW_LOD_LEVEL_1;
+        }
+        else if( Ratio > 0.25f )
+        {
+            RequestSize = SHADOW_LOD_LEVEL_2;
+        }
+        else
+        {
+            RequestSize = SHADOW_LOD_LEVEL_3;
+        }
+
+        const float Far = LightData.PointLights[i].PositionRadius.W;
+        const float Near = 0.1f;
+
+        for (uint32 face = 0; face < 6; face++)
+        {
+            FShadowAtlasTile ShadowAtlasTile;
+
+            if( ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile) )
+            {
+                uint32 InnerX = ShadowAtlasTile.X + SHADOW_ATLAS_BORDER;
+                uint32 InnerY = ShadowAtlasTile.Y + SHADOW_ATLAS_BORDER;
+                uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;
+
+                ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
+
+                FMatrix FaceVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, face);
+                LightData.PointLights[i].VeiwProjection[face] = FaceVP;
+                LightData.PointLights[i].AtlasScaleOffset[face] = {ShadowAtlasTile.Size, ShadowAtlasTile.Size, ShadowAtlasTile.X, ShadowAtlasTile.Y};
+
+                DrawShadowCasters(Scene, FaceVP, ViewMode, nullptr);
+            }
+            else
+            {
+                LightData.PointLights[i].AtlasScaleOffset[face] = { 0.0f,0.0f,0.0f,0.0f };
+            }            
+        }        
+    }
+
+    // SpotLight Loop
+    uint32 SpotLightCount = LightData.SpotLightCount;
+    for( uint32 i = 0; i < SpotLightCount; i++ )
+    {
+        if( LightData.SpotLights[i].ShadowParameters.W == 0.0f )
+        {
+            continue;
+        }
+
+        FVector LightPosition = { LightData.SpotLights[i].PositionRadius.X, LightData.SpotLights[i].PositionRadius.Y, LightData.SpotLights[i].PositionRadius.Z };
+        float LightDistance = (LightPosition - CameraLocation).Length();
+
+        float Ratio = (LightData.SpotLights[i].PositionRadius.W) / FMath::Max(LightDistance, 1.0f);
+        uint32 RequestSize = 0;
+
+        if( Ratio > 0.5f )
+        {
+            RequestSize = SHADOW_LOD_LEVEL_1;
+        }
+        else if( Ratio > 0.25f )
+        {
+            RequestSize = SHADOW_LOD_LEVEL_2;
+        }
+        else
+        {
+            RequestSize = SHADOW_LOD_LEVEL_3;
+        }
+
+        const float Far = LightData.SpotLights[i].PositionRadius.W;
+        const float Near = 0.1f;
+
+        FShadowAtlasTile ShadowAtlasTile;
+
+        if( ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile) )
+        {
+            uint32 InnerX = ShadowAtlasTile.X + SHADOW_ATLAS_BORDER;
+            uint32 InnerY = ShadowAtlasTile.Y + SHADOW_ATLAS_BORDER;
+            uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;
+
+            ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
+
+            LightData.SpotLights[i].AtlasScaleOffset = { ShadowAtlasTile.Size, ShadowAtlasTile.Size, ShadowAtlasTile.X, ShadowAtlasTile.Y };
+            LightData.SpotLights[i].ShadowParameters.Z = 1.0f / (float)ShadowAtlasTile.Size;
+
+            DrawShadowCasters(Scene, LightData.SpotLights[i].ViewProjection, ViewMode, nullptr);
+        }
+        else
+        {
+            LightData.SpotLights[i].AtlasScaleOffset = { 0.0f,0.0f,0.0f,0.0f };
+        }
+    }
+
+    ShadowRenderer->EndShadowPass();
+
+    // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
+    FViewConstants CameraViewConstants{};
+    CameraViewConstants.VP = CameraViewProjection;
+    CameraViewConstants.CameraPosition = CameraLocation;
+    RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
+}

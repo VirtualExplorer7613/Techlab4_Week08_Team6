@@ -42,6 +42,8 @@ struct FPointLightInfo
     float4 ColorIntensity;
     float4 FalloffEnabled;
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    matrix ViewProjection[6];
+    float4 AtlasScaleOffset[6]; // xy : scale, zw : offset
 };
 
 struct FSpotLightInfo
@@ -51,8 +53,9 @@ struct FSpotLightInfo
     float4 FalloffEnabled;
     float4 OutAngleInvCosDiff;
     float4 FowardVector;
-    matrix ViewProjection;
+    matrix ViewProjection;    
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 AtlasScaleOffset; // xy : scale, zw : offset
 };
 
 struct FAmbientLightInfo
