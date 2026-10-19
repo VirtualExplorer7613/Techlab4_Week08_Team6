@@ -38,25 +38,32 @@ void FSettingsPanel::OnRender()
 	// 렌더링 옵션 (Toggles)
 	ImGui::SeparatorText("Rendering");
 
+	const auto DrawShowFlag = [this](const char* Label, EShowFlags Flag)
+	{
+		bool bEnabled = HasFlag(Flags, Flag);
+		if (ImGui::Checkbox(Label, &bEnabled))
+			SetFlag(Flag, bEnabled);
+	};
+
 	ImGui::TextDisabled("Fill mode is configured per viewport.");
-	ImGui::Checkbox("Draw Primitives", &Settings.bDrawPrimitives);
-	ImGui::Checkbox("Draw Bounding Box", &Settings.bDrawBoundingBox);
-	ImGui::Checkbox("Show Object UUID", &Settings.bShowUUID);
+	DrawShowFlag("Draw Primitives", EShowFlags::Primitives);
+	DrawShowFlag("Draw Bounding Box", EShowFlags::BoundingBox);
+	DrawShowFlag("Show Object UUID", EShowFlags::UUID);
 	ImGui::Checkbox("FXAA", &Settings.bEnableFXAA);
+    DrawShowFlag("Show Shadows", EShowFlags::Shadows);
 	ImGui::Checkbox("Depth View", &Settings.bDepthView);
 	ImGui::Checkbox("Tile-Based Light Culling", &Settings.bTileBasedLightCulling);
-	ImGui::Checkbox("Exponential Height Fog", &Settings.bExponentialHeightFog);
+	DrawShowFlag("Exponential Height Fog", EShowFlags::ExponentialHeightFog);
 	//////////////////////////////////////////////////////////
 
 	ImGui::Dummy(ImVec2(0.0f, SectionGap));
 	ImGui::SeparatorText("Grid");
 
-	ImGui::Checkbox("Draw Batch Line / Grid", &Settings.bDrawBatchLine);
-	ImGui::Checkbox("Draw PS Grid", &Settings.bDrawPSGrid);
+	DrawShowFlag("Draw Batch Line / Grid", EShowFlags::BatchLine);
+	DrawShowFlag("Draw PS Grid", EShowFlags::PSGrid);
 
 	ImGui::SetNextItemWidth(200.0f);
 	ImGui::SliderInt("Grid Spacing", &Settings.GridSpacing, 1, 100);
-
 	//////////////////////////////////////////////////////////
 
 	// 에디터 수치 설정 (Values)
@@ -114,11 +121,13 @@ bool FSettingsPanel::SaveSettings() const
 	}
 
 	File << "[Rendering]\n";
-	File << "DrawPrimitives=" << Settings.bDrawPrimitives << "\n";
-	File << "DrawBoundingBox=" << Settings.bDrawBoundingBox << "\n";
-	File << "ShowUUID=" << Settings.bShowUUID << "\n";
-	File << "DrawBatchLine=" << Settings.bDrawBatchLine << "\n";
-	File << "DrawPSGrid=" << Settings.bDrawPSGrid << "\n";
+	File << "DrawPrimitives=" << HasFlag(Flags, EShowFlags::Primitives) << "\n";
+	File << "DrawBoundingBox=" << HasFlag(Flags, EShowFlags::BoundingBox) << "\n";
+	File << "ShowUUID=" << HasFlag(Flags, EShowFlags::UUID) << "\n";
+	File << "DrawBatchLine=" << HasFlag(Flags, EShowFlags::BatchLine) << "\n";
+	File << "DrawPSGrid=" << HasFlag(Flags, EShowFlags::PSGrid) << "\n";
+	File << "ExponentialHeightFog=" << HasFlag(Flags, EShowFlags::ExponentialHeightFog) << "\n";
+	File << "ShowShadows=" << HasFlag(Flags, EShowFlags::Shadows) << "\n";
 	File << "EnableFXAA=" << Settings.bEnableFXAA << "\n";
 	File << "\n";
 
@@ -198,9 +207,6 @@ bool FSettingsPanel::LoadSettings()
                         Settings.ViewPreset[Index] = static_cast<int32>(Value);
                     else if (Key == Prefix + "ViewMode" && Value >= 0 && Value < static_cast<int32>(EViewMode::MAX) && Value == static_cast<int32>(Value))
                         Settings.ViewMode[Index] = static_cast<int32>(Value);
-                    // 구형 ini의 View별 Wireframe 키는 ViewMode가 없을 때만 Wireframe 모드로 옮긴다.
-                    else if (Key == Prefix + "Wireframe" && Value == 1 && Settings.ViewMode[Index] < 0)
-                        Settings.ViewMode[Index] = static_cast<int32>(EViewMode::Wireframe);
                     else if (Key == Prefix + "LocationX")
                     {
                         Settings.ViewLocation[Index].X = Value;
@@ -237,12 +243,13 @@ bool FSettingsPanel::LoadSettings()
                         RotationComponentMasks[Index] |= 1 << 3;
                     }
                 }
-                if (Key == "Wireframe") Settings.bWireframe = std::stoi(ValueStr);
-				else if (Key == "DrawPrimitives") Settings.bDrawPrimitives = std::stoi(ValueStr);
-				else if (Key == "DrawBoundingBox") Settings.bDrawBoundingBox = std::stoi(ValueStr);
-				else if (Key == "ShowUUID") Settings.bShowUUID = std::stoi(ValueStr);
-				else if (Key == "DrawBatchLine") Settings.bDrawBatchLine = std::stoi(ValueStr);
-				else if (Key == "DrawPSGrid") Settings.bDrawPSGrid = std::stoi(ValueStr);
+                if (Key == "DrawPrimitives") SetFlag(EShowFlags::Primitives, std::stoi(ValueStr) != 0);
+				else if (Key == "DrawBoundingBox") SetFlag(EShowFlags::BoundingBox, std::stoi(ValueStr) != 0);
+				else if (Key == "ShowUUID") SetFlag(EShowFlags::UUID, std::stoi(ValueStr) != 0);
+				else if (Key == "DrawBatchLine") SetFlag(EShowFlags::BatchLine, std::stoi(ValueStr) != 0);
+				else if (Key == "DrawPSGrid") SetFlag(EShowFlags::PSGrid, std::stoi(ValueStr) != 0);
+				else if (Key == "ExponentialHeightFog") SetFlag(EShowFlags::ExponentialHeightFog, std::stoi(ValueStr) != 0);
+				else if (Key == "ShowShadows") SetFlag(EShowFlags::Shadows, std::stoi(ValueStr) != 0);
 				else if (Key == "EnableFXAA") Settings.bEnableFXAA = std::stoi(ValueStr);
 
 				else if (Key == "CameraMoveSpeed") Settings.CameraSpeed = std::stof(ValueStr);
@@ -313,7 +320,7 @@ void FSettingsPanel::ReadViewportSettings(FEditorSettings& Out) const
 // 종료 시 Adapter를 읽지 않도록 살아 있는 동안 저장용 설정을 갱신한다.
 void FSettingsPanel::CaptureViewportSettings() { ReadViewportSettings(Settings); }
 
-// 저장 프리셋·투영·표시를 슬롯별로 복원하며 구형 ini는 초기값과 공통 Wireframe을 사용한다.
+// 저장 프리셋·투영·표시를 슬롯별로 복원하며 미저장 ViewMode는 기본값을 사용한다.
 void FSettingsPanel::ApplyViewportSettings()
 {
     if (!ViewportAdapter) return;
@@ -333,8 +340,6 @@ void FSettingsPanel::ApplyViewportSettings()
         EViewMode Mode = EViewMode::Lit_Phong;
         if (Settings.ViewMode[Index] >= 0)
             Mode = static_cast<EViewMode>(Settings.ViewMode[Index]);
-        else if (Settings.bWireframe)
-            Mode = EViewMode::Wireframe;
         ViewportAdapter->SetViewMode(Index, Mode);
     }
 }
