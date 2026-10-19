@@ -228,35 +228,37 @@ FLightResult BlinnPhong(float3 N, float3 L, float3 V, float3 Radiance)
 }
 
 
-float Disc(float3 lightToPixel, float projDepth, float bias)
+float SampleCubeShadow(float3 lightToPixel, float projDepth, float bias)
 {
     return PointShadowMap.SampleCmpLevelZero(g_SampleLinearComparison, lightToPixel, projDepth - bias);
 }
 
-float Disc5(float3 lightToPixel, float projDepth, float bias, float invMapSize)
+float CubeDiscPCF5(float3 lightToPixel, float projDepth, float bias, float invMapSize)
 {
     float3 nomalLitghtToPixel = normalize(lightToPixel);
     float visibility = 0;
-    float3 sideVector = cross(nomalLitghtToPixel, float3(0.0f, 0.0f ,1.0f));// 월드 Z축 (0,0,1)
+    float3 axis = abs(nomalLitghtToPixel.z) > 0.99 ? float3(1.0f, 0.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f); // 월드 Z축 (0,0,1)
+    float3 sideVector = normalize(cross(nomalLitghtToPixel, axis));
     float3 upVector = cross(sideVector, nomalLitghtToPixel);
-
+    
     sideVector = sideVector * invMapSize;
     upVector = upVector * invMapSize;
 
     for (int i = 0; i < 5; i++)
     {
         float3 CurrentPos = nomalLitghtToPixel + (sideVector * DiscSamples5[i].x + upVector * DiscSamples5[i].y);
-        visibility += Disc(CurrentPos, projDepth, bias);
+        visibility += SampleCubeShadow(CurrentPos, projDepth, bias);
     }
     
     return visibility / 5;
 }
 
-float Disc12(float3 lightToPixel, float projDepth, float bias, float invMapSize)
+float CubeDiscPCF12(float3 lightToPixel, float projDepth, float bias, float invMapSize)
 {
     float3 nomalLitghtToPixel = normalize(lightToPixel);
     float visibility = 0;
-    float3 sideVector = cross(nomalLitghtToPixel, float3(0.0f, 0.0f, 1.0f));
+    float3 axis = abs(nomalLitghtToPixel.z) > 0.99 ? float3(1.0f, 0.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f); // 월드 Z축 (0,0,1)
+    float3 sideVector = normalize(cross(nomalLitghtToPixel, axis));
     float3 upVector = cross(sideVector, nomalLitghtToPixel);
 
     sideVector = sideVector * invMapSize;
@@ -265,17 +267,18 @@ float Disc12(float3 lightToPixel, float projDepth, float bias, float invMapSize)
     for (int i = 0; i < 12; i++)
     {
         float3 CurrentPos = nomalLitghtToPixel + (sideVector * DiscSamples12[i].x + upVector * DiscSamples12[i].y);
-        visibility += Disc(CurrentPos, projDepth, bias);
+        visibility += SampleCubeShadow(CurrentPos, projDepth, bias);
     }
     
     return visibility / 12;
 }
 
-float Disc29(float3 lightToPixel, float projDepth, float bias, float invMapSize)
+float CubeDiscPCF29(float3 lightToPixel, float projDepth, float bias, float invMapSize)
 {
     float3 nomalLitghtToPixel = normalize(lightToPixel);
     float visibility = 0;
-    float3 sideVector = cross(nomalLitghtToPixel, float3(0.0f, 0.0f, 1.0f));
+    float3 axis = abs(nomalLitghtToPixel.z) > 0.99 ? float3(1.0f, 0.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f); // 월드 Z축 (0,0,1)
+    float3 sideVector = normalize(cross(nomalLitghtToPixel, axis));
     float3 upVector = cross(sideVector, nomalLitghtToPixel);
 
     sideVector = sideVector * invMapSize;
@@ -284,7 +287,7 @@ float Disc29(float3 lightToPixel, float projDepth, float bias, float invMapSize)
     for (int i = 0; i < 29; i++)
     {
         float3 CurrentPos = nomalLitghtToPixel + (sideVector * DiscSamples29[i].x + upVector * DiscSamples29[i].y);
-        visibility += Disc(CurrentPos, projDepth, bias);
+        visibility += SampleCubeShadow(CurrentPos, projDepth, bias);
     }
     
     return visibility / 29;
@@ -300,21 +303,21 @@ float ShadowFilteringCube(TextureCube<float> ShadowMap, float3 lightToPixel, flo
     {
         case SHADOW_QUALITY_LOW:
         {
-            visibility += Disc(lightToPixel, projDepth, bias);
+            visibility += SampleCubeShadow(lightToPixel, projDepth, bias);
             break;
         }
 
         case SHADOW_QUALITY_MEDIUM:
         {
-            visibility += Disc5(lightToPixel, projDepth, bias, invMapSize);
+            visibility += CubeDiscPCF5(lightToPixel, projDepth, bias, invMapSize);
             break;
         }
         case SHADOW_QUALITY_HIGH:
-            visibility += Disc12(lightToPixel, projDepth, bias, invMapSize);
+            visibility += CubeDiscPCF12(lightToPixel, projDepth, bias, invMapSize);
             break;
         case SHADOW_QUALITY_EPIC:
         {
-            visibility += Disc29(lightToPixel, projDepth, bias, invMapSize);
+            visibility += CubeDiscPCF29(lightToPixel, projDepth, bias, invMapSize);
             break;
         }
             
@@ -486,6 +489,8 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
     FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
 
     float Shadow = CalculatePointShadow(worldPos, info.PositionRadius.xyz, normal, index, info.ShadowParameters.z);
+    
+    Shadow = saturate((Shadow - 0.5) * info.ShadowFilterParameters.x + 0.5);
 
     Result.Diffuse *= Shadow;
     Result.Specular *= Shadow;
@@ -560,6 +565,10 @@ FLightResult CalculateSpotLight(FSpotLightInfo info, float3 worldPos, float3 nor
     float3 radiance = ColorIntensity.rgb * ColorIntensity.w * falloff * enabled;
 
     float Shadow = CalculateSpotShadow(worldPos, normal, index, info.ShadowParameters.z);
+
+    Shadow = saturate((Shadow - 0.5) * info.ShadowFilterParameters.x + 0.5);
+
+    
     FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
     Result.Diffuse = Result.Diffuse * Shadow;
     Result.Specular = Result.Specular * Shadow;
@@ -607,7 +616,8 @@ FLightResult CalculateDirectionalLight(FDirectionalLightInfo info, float3 normal
     FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
 
     float Shadow = CalculateDirectionalShadow(worldPos, normal, info.ShadowParameters.z);
-
+    Shadow = saturate((Shadow - 0.5) * info.ShadowFilterParameters.x + 0.5);
+    
     Result.Diffuse *= Shadow;
     Result.Specular *= Shadow;
     

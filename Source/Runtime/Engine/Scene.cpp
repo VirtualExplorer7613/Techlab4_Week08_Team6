@@ -285,7 +285,7 @@ void FScene::UpdatePointLight(FLightConstants &LightConstants,
                                        LightComponent->GetCastShadows() ? 1.f : 0.f);
 
   PointData.ShadowFilterParameters = FVector4(
-      std::max<float>(LightComponent->GetShadowSharpen(), 0.001f),
+      LightComponent->GetShadowSharpen() * 7 + 1,
       std::max<float>(1, 0.001f), // TransitionSize로 나중에 바꿔야됨
       0,
       0
@@ -352,7 +352,7 @@ void FScene::UpdateSpotLight(FLightConstants &LightConstants,
                                               LightComponent->GetCastShadows() ? 1.f : 0.f);
 
   SpotData.ShadowFilterParameters = FVector4(
-      std::max<float>(LightComponent->GetShadowSharpen(), 0.001f),
+      LightComponent->GetShadowSharpen() * 7 + 1,
       std::max<float>(1, 0.001f), // TransitionSize로 나중에 바꿔야됨
       0,
       0
@@ -428,7 +428,7 @@ void FScene::UpdateDirectionalLight(
 	  LightComponent->GetCastShadows() ? 1.f : 0.f);
 
   DirectionalData.ShadowFilterParameters = FVector4(
-      std::max<float>(LightComponent->GetShadowSharpen(), 0.001f),
+      LightComponent->GetShadowSharpen() * 7 + 1,
       std::max<float>(1, 0.001f), // TransitionSize로 나중에 바꿔야됨
       0,
       0
