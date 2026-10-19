@@ -47,8 +47,8 @@ void FSettingsPanel::OnRender()
 	ImGui::Checkbox("Tile-Based Light Culling", &Settings.bTileBasedLightCulling);
 	ImGui::Checkbox("Exponential Height Fog", &Settings.bExponentialHeightFog);
 
-    static const char *QualityLabels[] = {"Hard", "Gather 1x1", "Gather 3x3", "Gather 5x5", "Box 3x3"};
-    // UberLut.hlsl SHADOW_QUALITY랑 동일하게 
+    static const char *QualityLabels[] = {"Low", "Medium", "High", "Epic", "Box 3x3"};
+    // UberLut.hlsl SHADOW_QUALITY랑 동일하게
 
     int Quality = static_cast<int>(Settings.ShadowQuality);
     ImGui::SetNextItemWidth(200.0f);
