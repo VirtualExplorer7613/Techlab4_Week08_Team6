@@ -150,6 +150,8 @@ public:
 	uint8* BeginObjectConstants(uint32 MaxSlots);
 	void EndObjectConstants();
 
+    void UploadLightGlobalConstants(const FMatrix &DirectionalLightVP);
+
 	void SetLight(const FLightConstants& LightData);
 
     bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc &Desc, const FMatrix &LightVP, EViewMode ViewMode);

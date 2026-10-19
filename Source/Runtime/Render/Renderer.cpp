@@ -701,19 +701,28 @@ void FRenderer::UpdatePerObjectConstants(const FMatrix &World, const bool bRecei
     RenderCommand::UpdateBufferData(PerObjectCB.get(), &Constants);
 }
 
-void FRenderer::SetLight(const FLightConstants& InLightData)
+void FRenderer::UploadLightGlobalConstants(const FMatrix &DirectionalLightVP)
 {
-	LightData = InLightData;
+    FLightGlobalConstants Globals{};
+    Globals.AmbientLight = LightData.AmbientLight;
+    Globals.DirectionalLight = LightData.DirectionalLight;
+    Globals.DirectionalLight.ViewProjection = DirectionalLightVP;
+    Globals.PointLightCount = LightData.PointLightCount;
+    Globals.SpotLightCount = LightData.SpotLightCount;
 
-	FLightGlobalConstants Globals;
-	Globals.AmbientLight = LightData.AmbientLight;
-	Globals.DirectionalLight = LightData.DirectionalLight;
-	Globals.PointLightCount = LightData.PointLightCount;
-	Globals.SpotLightCount = LightData.SpotLightCount;
-	RenderCommand::UpdateBufferData(LightCB.get(), &Globals, sizeof(FLightGlobalConstants));
-	UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight) * LightData.PointLightCount);
-	UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
+    RenderCommand::UpdateBufferData(LightCB.get(), &Globals, sizeof(FLightGlobalConstants));
 }
+
+void FRenderer::SetLight(const FLightConstants &InLightData)
+{
+    LightData = InLightData;
+
+    UploadLightGlobalConstants(LightData.DirectionalLight.ViewProjection);
+
+    UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight) * LightData.PointLightCount);
+    UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
+}
+
 
 void FRenderer::DrawShadowCasters(const FScene &Scene, const FMatrix &LightVP, EViewMode ViewMode)
 {
