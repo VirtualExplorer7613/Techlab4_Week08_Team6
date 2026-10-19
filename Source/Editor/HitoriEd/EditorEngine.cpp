@@ -29,6 +29,8 @@
 #include "Editor/HitoriEd/EditorFileUtils.h"
 #include "UObject/UObjectIterator.h"
 #include "Component/BillboardComponent.h"
+#include "Render/Shadow/CascadeShadowMaps.h"
+#include "Component/DirectionalLightComponent.h"
 
 #include "Core/EngineLog.h"
 #include "Core/Stats/LightweightStats.h"
@@ -199,6 +201,62 @@ bool UEditorEngine::Init()
 			}
 		}
 	);
+
+    DetailsPanel->SetShadowPreviewCallback([this](ULightComponent *Light) {
+        if (!Light)
+            return;
+
+        ImGui::PushID(Light);
+
+        const bool bDirectional = Cast<UDirectionalLightComponent>(Light) != nullptr;
+
+        // 기존 Shadow Map 이미지 위.
+        if (bDirectional)
+        {
+            bool bCSMEnabled = Renderer->GetCSMEnabled();
+
+            if (ImGui::Checkbox("Cascade Shadow Map", &bCSMEnabled))
+            {
+                Renderer->SetCSMEnabled(bCSMEnabled);
+            }
+
+            bool bDebugColors = Renderer->GetCascadeDebugColors();
+
+            ImGui::BeginDisabled(!bCSMEnabled);
+
+            bool bBlendEnabled = Renderer->GetCascadeBlendEnabled();
+
+            if (ImGui::Checkbox("Cascade Shadow Blending", &bBlendEnabled))
+            {
+                Renderer->SetCascadeBlendEnabled(bBlendEnabled);
+            }
+
+            if (ImGui::Checkbox("Cascade Shadow Colors", &bDebugColors))
+            {
+                Renderer->SetCascadeDebugColors(bDebugColors);
+            }
+            ImGui::EndDisabled();
+        }
+
+        // 기존 단일 Shadow Map 이미지.
+        FTexture2D *Texture = Light->GetShadowMapTexture();
+
+        if (Texture && Texture->GetSRV())
+        {
+            ImGui::Image(reinterpret_cast<ImTextureID>(Texture->GetSRV()), ImVec2(256.0f, 256.0f));
+        }
+
+        // 기존 이미지 아래.
+        if (bDirectional)
+        {
+            ImGui::SeparatorText("Cascade Shadow Maps");
+
+            DrawCascadeShadowPreviewContent(Renderer->GetCascadeShadowMaps());
+        }
+
+        ImGui::PopID();
+    });
+
 
 	OutlinerPanel->SetDeleteActorCallback(
 		[this](AActor* Actor)
@@ -953,6 +1011,9 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
     Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
     Renderer->RenderPointShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
 
+    Renderer->UpdateCascadeDebugConstants(ViewWorld.GetScene(), ViewProjection, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex));
+    Renderer->RenderCascadeShadowPreview(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+
 	if (bPrepass)
 	{
 		RenderDepthPrepass(ViewIndex, ViewRenderingInfo, ViewProjection);        
@@ -1273,4 +1334,65 @@ void UEditorEngine::SaveSceneAs()
 		return;
 	}
 	FEditorFileUtils::SaveSceneAs(EditorWorld);
+}
+
+void UEditorEngine::DrawCascadeShadowPreviewContent(const FCascadeShadowMaps &Maps)
+{
+    const FString ShaderPath = "Resources/Shader/CascadeDepthPreview.hlsl";
+
+    FShaderProgram *Program = FRenderResourceManager::GetShaderProgram(ShaderPath);
+
+    if (!Program || Program->SourcePath != ShaderPath || !Program->PixelShader || !Program->PixelShader->IsValid())
+    {
+        ImGui::TextUnformatted("CascadeDepthPreview shader is unavailable.");
+        return;
+    }
+
+    ID3D11PixelShader *PixelShader = Program->PixelShader->GetShader();
+
+    ImGui::Text("%u cascades, %u x %u", Maps.GetCascadeCount(), Maps.GetResolution(), Maps.GetResolution());
+
+    if (ImGui::BeginTable("CascadeImages", 2))
+    {
+        for (uint32 Index = 0; Index < Maps.GetCascadeCount(); ++Index)
+        {
+            ImGui::TableNextColumn();
+            ImGui::Text("Cascade %u", Index);
+
+            ID3D11ShaderResourceView *SRV = Maps.GetSliceSRV(Index);
+
+            if (!SRV)
+            {
+                ImGui::TextUnformatted("No depth resource.");
+                continue;
+            }
+
+            const float Size = std::max(1.0f, std::min(200.0f, ImGui::GetContentRegionAvail().x));
+
+            ImDrawList *DrawList = ImGui::GetWindowDrawList();
+
+            DrawList->AddCallback(BindCascadePreviewPS, PixelShader);
+
+            ImGui::Image(reinterpret_cast<ImTextureID>(SRV), ImVec2(Size, Size));
+
+            DrawList->AddCallback(UnbindCascadePreviewSRV);
+            DrawList->AddCallback(ImGui::GetPlatformIO().DrawCallback_ResetRenderState);
+        }
+
+        ImGui::EndTable();
+    }
+}
+
+void UEditorEngine::BindCascadePreviewPS(const ImDrawList *DrawList, const ImDrawCmd *Command)
+{
+    auto *PixelShader = static_cast<ID3D11PixelShader *>(Command->UserCallbackData);
+
+    RenderCommand::GetContext()->PSSetShader(PixelShader, nullptr, 0);
+}
+
+void UEditorEngine::UnbindCascadePreviewSRV(const ImDrawList *DrawList, const ImDrawCmd *Command)
+{
+    ID3D11ShaderResourceView *NullSRV = nullptr;
+
+    RenderCommand::GetContext()->PSSetShaderResources(0, 1, &NullSRV);
 }
