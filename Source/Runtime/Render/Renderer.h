@@ -120,6 +120,7 @@ struct alignas(16) FCascadeDebugConstants
 
     // 임시 경계값, 월드 단위. W는 사용하지 않는다.
     FVector4 SplitDepths = FVector4(5, 15, 30, 0);
+    FVector4 BlendStartDepths;
 
     // 16바이트
     float ShadowDistance = 0.0f;
@@ -128,10 +129,11 @@ struct alignas(16) FCascadeDebugConstants
     uint32 CSMEnabled = 0;
     // 16바이트
     uint32 DebugColorsEnabled = 0;
-    uint32 Padding[3] = {};
+    uint32 BlendEnabled = 0;
+    uint32 Padding[2] = {};
 };
 
-static_assert(sizeof(FCascadeDebugConstants) == 320, "FCascadeDebugConstants Size Error");
+static_assert(sizeof(FCascadeDebugConstants) == 336, "FCascadeDebugConstants Size Error");
 
 class FRenderer
 {
@@ -283,6 +285,16 @@ public:
         return bCSMEnabled;
     }
 
+    bool GetCascadeBlendEnabled() const
+    {
+        return bCascadeBlendEnabled;
+    }
+
+    void SetCascadeBlendEnabled(bool bEnabled)
+    {
+        bCascadeBlendEnabled = bEnabled;
+    }
+
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
 	FRenderQueue RenderPackets;
@@ -354,5 +366,6 @@ private:
 
     FCascadeShadowMaps CascadeShadowMaps;
     bool bCascadeDebugColors = false;
+    bool bCascadeBlendEnabled = false;
     TUniquePtr<FConstantBuffer> CascadeDebugCB;
 };

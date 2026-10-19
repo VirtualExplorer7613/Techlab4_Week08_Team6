@@ -251,6 +251,8 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
 {
     CascadeConstants = {};
 
+    CascadeConstants.BlendEnabled = bCascadeBlendEnabled ? 1u : 0u;
+
     const FVector Forward = CameraForward.Normalized();
     CascadeConstants.CameraForward = FVector4(Forward.X, Forward.Y, Forward.Z, 0.0f);
 
@@ -335,6 +337,11 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
             // SplitDepths[1] = 두 번째 Cascade 끝
             // ....
             CascadeConstants.SplitDepths[Index] = SplitFar;
+            constexpr float BlendFraction = 0.1f;
+
+            CascadeConstants.BlendStartDepths[Index] = Index + 1 < Count ? SplitFar - (SplitFar - SplitNear) * BlendFraction : SplitFar;
+            const float RenderNear = Index == 0 ? CameraNear : CascadeConstants.BlendStartDepths[Index - 1];
+
 
             // ───────────────────────
             // 이번 깊이 구간을 전체 카메라 구간의 비율로 변환
@@ -352,7 +359,8 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
             // NearRatio = (11 - 1) / (101 - 1) = 0.1
             // FarRatio  = (31 - 1) / (101 - 1) = 0.3
 
-            const float NearRatio = (SplitNear - CameraNear) / (CameraFar - CameraNear);
+            //const float NearRatio = (SplitNear - CameraNear) / (CameraFar - CameraNear);
+            const float NearRatio = (RenderNear - CameraNear) / (CameraFar - CameraNear);
             const float FarRatio = (SplitFar - CameraNear) / (CameraFar - CameraNear);
 
             // 이번 Cascade 프러스텀 꼭짓점 8개를 저장한다.

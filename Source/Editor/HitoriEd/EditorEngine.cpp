@@ -224,6 +224,13 @@ bool UEditorEngine::Init()
 
             ImGui::BeginDisabled(!bCSMEnabled);
 
+            bool bBlendEnabled = Renderer->GetCascadeBlendEnabled();
+
+            if (ImGui::Checkbox("Cascade Shadow Blending", &bBlendEnabled))
+            {
+                Renderer->SetCascadeBlendEnabled(bBlendEnabled);
+            }
+
             if (ImGui::Checkbox("Cascade Shadow Colors", &bDebugColors))
             {
                 Renderer->SetCascadeDebugColors(bDebugColors);

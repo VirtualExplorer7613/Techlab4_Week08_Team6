@@ -107,6 +107,7 @@ cbuffer CascadeDebugConstants : register(b5)
 
     float4 CascadeCameraForward;
     float4 CascadeSplitDepths;
+    float4 CascadeBlendStartDepths;
 
     float CascadeShadowDistance;
     float CascadeInvResolution;
@@ -114,7 +115,8 @@ cbuffer CascadeDebugConstants : register(b5)
     uint CSMEnabled;
 
     uint DebugColorsEnabled;
-    uint3 CascadePadding;
+    uint CascadeBlendEnabled;
+    uint2 CascadePadding;
 };
 
 #define TILE_SIZE 16
@@ -366,6 +368,64 @@ float3 GetDebugCascadeColor(uint index)
     return float3(1, 0, 1);
 }
 
+// Cascade 보간
+float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentVisibility, float bias)
+{
+    if (CascadeBlendEnabled == 0 ||
+        cascadeIndex + 1 >= CascadeCount)
+    {
+        return currentVisibility;
+    }
+
+    float viewDepth = GetCascadeViewDepth(worldPos);
+    float blendStart = CascadeBlendStartDepths[cascadeIndex];
+    float blendEnd = CascadeSplitDepths[cascadeIndex];
+
+    // 전환 구간에 들어오지 않았다면 추가 샘플링 생략
+    if (blendEnd <= blendStart || viewDepth <= blendStart)
+    {
+        return currentVisibility;
+    }
+
+    uint nextIndex = cascadeIndex + 1;
+    
+    float4 nextPos = mul(float4(worldPos, 1.0f), CascadeLightVP[nextIndex]);
+
+    nextPos.xyz /= nextPos.w;
+    nextPos.x = nextPos.x * 0.5f + 0.5f;
+    nextPos.y = -nextPos.y * 0.5f + 0.5f;
+
+    // 다음 맵에서 유효하지 않은 위치면 현재 결과 유지
+    if (any(nextPos.xyz < 0.0f) || any(nextPos.xyz > 1.0f))
+    {
+        return currentVisibility;
+    }
+
+    float2 texelSize = float2(CascadeInvResolution, CascadeInvResolution);
+
+    float nextVisibility = 0.0f;
+
+    // 이중 반복문으로 3*3 위치 방문
+    for (int x = -1; x <= 1; ++x)
+    {
+        for (int y = -1; y <= 1; ++y)
+        {
+            // 텍셀 단위 이동을 UV 단위로 변환
+            float2 offset = float2(x, y) * texelSize;
+
+            float depth = CascadeShadowMap.SampleLevel(g_SampleShadow, float3(nextPos.xy + offset, (float) nextIndex), 0);
+
+            nextVisibility += (nextPos.z - bias) <= depth ? 1.0f : 0.0f;
+        }
+    }
+    nextVisibility /= 9.0f;
+    // 현재 픽셀이 전환 구간을 얼마나 지나왔는지 0~1로 계산
+    float t = saturate((viewDepth - blendStart) / (blendEnd - blendStart));
+    
+    return lerp(currentVisibility, nextVisibility, t);
+    
+}
+
 float CalculateDirectionalShadow(float3 worldPos, float3 normal)
 {
     bool useCascade = UseCSM();
@@ -428,6 +488,12 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal)
         }
     }
     visibility /= 9.0f;
+
+    if (useCascade)
+    {
+        visibility = ApplyCascadeShadowBlend(worldPos, cascadeIndex, visibility, bias);
+    }
+    
     return visibility;
 }
 
