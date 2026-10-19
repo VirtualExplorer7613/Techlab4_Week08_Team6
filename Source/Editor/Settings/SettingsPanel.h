@@ -45,7 +45,8 @@ struct FEditorSettings
     bool bViewLocationSaved[4]{};
     bool bViewRotationSaved[4]{};
 
-    uint32 ShadowQuality;
+    uint32  ShadowQuality = 0;
+    float   TransitionFactor = 2;
 };
 
 

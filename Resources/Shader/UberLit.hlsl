@@ -106,7 +106,7 @@ struct FPointLightInfo
     float4 ColorIntensity;
     float4 FalloffEnabled;
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
 };
 
 struct FSpotLightInfo
@@ -118,7 +118,7 @@ struct FSpotLightInfo
     float4 FowardVector;
     matrix ViewProjection;
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
 };
 
 struct FAmbientLightInfo
@@ -132,7 +132,7 @@ struct FDirectionalLightInfo
     float4 Direction;
     matrix LightVP;
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
 };
 
 // 개수가 하나뿐인 라이트와 로컬 라이트 개수만 cbuffer에 둔다 (C++ FLightGlobalConstants와 같은 레이아웃)
@@ -331,8 +331,8 @@ float ShadowFilteringCube(TextureCube<float> ShadowMap, float3 lightToPixel, flo
     return visibility;
 }
 
-float Gather1X1(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize)
-{
+float Gather1X1(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
+{   
     float2 texelPos = (shadowPos.xy / invMapSize) - 0.5f;
     float2 base = floor(texelPos);
     float2 fraction = frac(texelPos);
@@ -340,8 +340,8 @@ float Gather1X1(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float 
     float2 gatherUV = (base + 1) * invMapSize;
 
     float4 depth = ShadowMap.Gather(g_SamplePointBorder, gatherUV); // x = 왼쪽 아래, y = 오른쪽 아래, z = 오른쪽 위, w = 왼쪽 위
-        
-    float4 lit = (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
+
+    float4 lit = saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
 
     float top = lerp(lit.w, lit.z, fraction.x);
     float bottom = lerp(lit.x, lit.y, fraction.x);
@@ -349,7 +349,7 @@ float Gather1X1(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float 
     return lerp(top, bottom, fraction.y);
 }
 
-float Gather3X3(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize)
+float Gather3X3(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
 {
     float visibility = 0;
     
@@ -360,13 +360,13 @@ float Gather3X3(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, 
             float2 offset = float2(x, y) * texelSize;
             float4 CurrentPos = shadowPos;
             CurrentPos.xy = CurrentPos.xy + offset;
-            visibility += Gather1X1(ShadowMap, CurrentPos, bias, invMapSize);
+            visibility += Gather1X1(ShadowMap, CurrentPos, bias, invMapSize, TransitionScale);
         }
     }
     return visibility /= 9.0f;
 }
 
-float Gather5X5(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize)
+float Gather5X5(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
 {
     float visibility = 0;
     
@@ -377,15 +377,15 @@ float Gather5X5(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, 
             float2 offset = float2(x, y) * texelSize;
             float4 CurrentPos = shadowPos;
             CurrentPos.xy = CurrentPos.xy + offset;
-            visibility += Gather1X1(ShadowMap, CurrentPos, bias, invMapSize);
+            visibility += Gather1X1(ShadowMap, CurrentPos, bias, invMapSize, TransitionScale);
         }
     }
     return visibility /= 25.0f;
 }
 
 
-float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize)
-{
+float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
+{   
     float visibility = 0.0f;
 
     [branch]
@@ -394,25 +394,26 @@ float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 sha
         case SHADOW_QUALITY_LOW:
         {
             float depth = ShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy, 0);
-            visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
+            
+            visibility += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
             break;
         }
 
         case SHADOW_QUALITY_MEDIUM:
         {
-            visibility = Gather1X1(ShadowMap, shadowPos, bias, invMapSize);
+            visibility = Gather1X1(ShadowMap, shadowPos, bias, invMapSize, TransitionScale);
             break;   
         }
         
         case SHADOW_QUALITY_HIGH:
         {
-            visibility = Gather3X3(ShadowMap, texelSize, shadowPos, bias, invMapSize);
+            visibility = Gather3X3(ShadowMap, texelSize, shadowPos, bias, invMapSize, TransitionScale);
             break;
         }
             
         case SHADOW_QUALITY_EPIC:
         {
-            visibility = Gather5X5(ShadowMap, texelSize, shadowPos, bias, invMapSize);
+            visibility = Gather5X5(ShadowMap, texelSize, shadowPos, bias, invMapSize, TransitionScale);
             break;
         }
             
@@ -424,7 +425,7 @@ float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 sha
                 {
                     float2 offset = float2(x, y) * texelSize;
                     float depth = ShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy + offset, 0);
-                    visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
+                    visibility += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
                 }
             }
             visibility /= 9.0f;
@@ -433,7 +434,7 @@ float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 sha
         default:
         {
             float depth = ShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy, 0);
-            visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
+            visibility += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
             break;
         }
     }
@@ -498,7 +499,7 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
     return Result;
 }
 
-float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, float invMapSize)
+float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLightInfo info)
 {
     // TODO : 여러개 지원 해야함
     if (index != 0)
@@ -535,7 +536,7 @@ float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, float invM
     
     float bias = SpotLights[0].ShadowParameters.x + SpotLights[0].ShadowParameters.y * (1.0f - NdotL);
     
-    return ShadowFiltering2D(SpotShadowMap, texelSize, shadowPos, bias, invMapSize);
+    return ShadowFiltering2D(SpotShadowMap, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
 }
 
 FLightResult CalculateSpotLight(FSpotLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
@@ -564,7 +565,7 @@ FLightResult CalculateSpotLight(FSpotLightInfo info, float3 worldPos, float3 nor
     float enabled = FalloffEnabled.y;
     float3 radiance = ColorIntensity.rgb * ColorIntensity.w * falloff * enabled;
 
-    float Shadow = CalculateSpotShadow(worldPos, normal, index, info.ShadowParameters.z);
+    float Shadow = CalculateSpotShadow(worldPos, normal, index, info);
 
     Shadow = saturate((Shadow - 0.5) * info.ShadowFilterParameters.x + 0.5);
 
@@ -580,7 +581,7 @@ float3 CalculateAmbientLight(FAmbientLightInfo info)
     return info.ColorIntensity.xyz * info.ColorIntensity.w;
 }
 
-float CalculateDirectionalShadow(float3 worldPos, float3 normal, float invMapSize)
+float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLightInfo info)
 {
     float4 shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
     shadowPos.xyz /= shadowPos.w; // W divde
@@ -604,7 +605,7 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal, float invMapSiz
     
     float bias = DirectionalLight.ShadowParameters.x + DirectionalLight.ShadowParameters.y * (1.0f - NdotL);
     
-    return ShadowFiltering2D(DirectionalShadowMap, texelSize, shadowPos, bias, invMapSize);
+    return ShadowFiltering2D(DirectionalShadowMap, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
 }
 
 FLightResult CalculateDirectionalLight(FDirectionalLightInfo info, float3 normal, float3 viewDir, float3 worldPos)
@@ -615,7 +616,7 @@ FLightResult CalculateDirectionalLight(FDirectionalLightInfo info, float3 normal
 
     FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
 
-    float Shadow = CalculateDirectionalShadow(worldPos, normal, info.ShadowParameters.z);
+    float Shadow = CalculateDirectionalShadow(worldPos, normal, info);
     Shadow = saturate((Shadow - 0.5) * info.ShadowFilterParameters.x + 0.5);
     
     Result.Diffuse *= Shadow;

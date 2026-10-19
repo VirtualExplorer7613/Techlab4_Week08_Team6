@@ -706,7 +706,12 @@ void DrawProperty(UObject *Object, const FProperty &Property, ImFont *CustomFont
     switch (Property.Type)
     {
     case EPropertyType::Float:
-        bChanged = ImGui::DragFloat(Label.c_str(), static_cast<float *>(ValuePtr), 0.1f);
+        if (Property.Name == "ShadowSharpen")
+        {
+            bChanged = ImGui::SliderFloat(Label.c_str(), static_cast<float *>(ValuePtr), 0.0f, 1.0f, "%.2f",ImGuiSliderFlags_AlwaysClamp);
+        }
+        else
+            bChanged = ImGui::DragFloat(Label.c_str(), static_cast<float *>(ValuePtr), 0.1f);
         break;
     case EPropertyType::Int:
         bChanged = ImGui::DragInt(Label.c_str(), static_cast<int *>(ValuePtr), 1.0f);

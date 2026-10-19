@@ -56,6 +56,7 @@ void FSettingsPanel::OnRender()
     {
         Settings.ShadowQuality = Quality;
     }
+    ImGui::SliderFloat("Soft Transition", &Settings.TransitionFactor, 0.0f, 10.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 	//////////////////////////////////////////////////////////
 
 	ImGui::Dummy(ImVec2(0.0f, SectionGap));
@@ -131,6 +132,7 @@ bool FSettingsPanel::SaveSettings() const
 	File << "DrawPSGrid=" << Settings.bDrawPSGrid << "\n";
 	File << "EnableFXAA=" << Settings.bEnableFXAA << "\n";
     File << "ShadowQuality=" << Settings.ShadowQuality << "\n";
+    File << "TransitionFactor=" << Settings.TransitionFactor << "\n";
 	File << "\n";
 
 	File << "[Editor]\n";
@@ -256,6 +258,7 @@ bool FSettingsPanel::LoadSettings()
 				else if (Key == "DrawPSGrid") Settings.bDrawPSGrid = std::stoi(ValueStr);
 				else if (Key == "EnableFXAA") Settings.bEnableFXAA = std::stoi(ValueStr);
                 else if (Key == "ShadowQuality") Settings.ShadowQuality = std::stoi(ValueStr);
+                else if (Key == "TransitionFactor") Settings.TransitionFactor = std::stof(ValueStr);
 
 				else if (Key == "CameraMoveSpeed") Settings.CameraSpeed = std::stof(ValueStr);
 				else if (Key == "CameraRotateSensitivity") Settings.MouseSensitivity = std::stof(ValueStr);

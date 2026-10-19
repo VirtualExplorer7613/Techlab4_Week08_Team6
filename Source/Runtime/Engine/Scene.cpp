@@ -212,6 +212,8 @@ void FScene::UpdateLightComponents(FRenderer *Renderer) {
 
     UClass *LightClass = LightComponent->GetClass();
 
+    float TransitionFactor = Renderer->GetTransitionFactor();
+
     // SpotLight가 PointLight를 상속받기 때문에 먼저 검사해야 한다.
     if (USpotLightComponent *SpotLightComponent =
             Cast<USpotLightComponent>(LightComponent)) {
@@ -219,14 +221,14 @@ void FScene::UpdateLightComponents(FRenderer *Renderer) {
         continue;
       }
       SpotLightComponent->SetShadowMapTexture(Renderer->GetSpotShadowMap());
-      UpdateSpotLight(Constants, SpotLightComponent);
+      UpdateSpotLight(Constants, SpotLightComponent, TransitionFactor);
     } else if (UPointLightComponent *PointLightComponent =
                    Cast<UPointLightComponent>(LightComponent)) {        
       if (Constants.PointLightCount >= NUM_POINT_LIGHT) {
         continue;
       }
 
-      UpdatePointLight(Constants, PointLightComponent);
+      UpdatePointLight(Constants, PointLightComponent, TransitionFactor);
     } else if (UAmbientLightComponent *AmbientLightComponent =
                    Cast<UAmbientLightComponent>(LightComponent)) {
       UpdateAmbientLight(Constants, AmbientLightComponent);
@@ -235,7 +237,7 @@ void FScene::UpdateLightComponents(FRenderer *Renderer) {
     else if (UDirectionalLightComponent *DirectionalLightComponent =
                  Cast<UDirectionalLightComponent>(LightComponent)) {
         DirectionalLightComponent->SetShadowMapTexture(Renderer->GetDirectionalShadowMap());
-      UpdateDirectionalLight(Constants, DirectionalLightComponent);
+        UpdateDirectionalLight(Constants, DirectionalLightComponent, TransitionFactor);
     }
   }
 
@@ -262,7 +264,9 @@ void FScene::UnRegisterLightComponent(ULightComponentBase *LightComponent) {
 }
 
 void FScene::UpdatePointLight(FLightConstants &LightConstants,
-                              UPointLightComponent *LightComponent) {
+                              UPointLightComponent *LightComponent,
+                              float TransitionFactor)
+{
   static FPointLight PointData{};
   const FVector Position = LightComponent->GetWorldLocation();
   const FVector4 Color = LightComponent->GetLightColor();
@@ -284,9 +288,12 @@ void FScene::UpdatePointLight(FLightConstants &LightConstants,
                                        1.f / static_cast<float>(LightComponent->GetShadowMapWidth()),
                                        LightComponent->GetCastShadows() ? 1.f : 0.f);
 
+  const float Bias = std::max<float>(LightComponent->GetShadowDepthBias(), 0.001f);
+  const float Size = std::max(TransitionFactor * Bias, 0.00001f);
+
   PointData.ShadowFilterParameters = FVector4(
-      LightComponent->GetShadowSharpen() * 7 + 1,
-      std::max<float>(1, 0.001f), // TransitionSize로 나중에 바꿔야됨
+      std::clamp(LightComponent->GetShadowSharpen(), 0.0f, 1.0f) * 7 + 1,
+      1 / Size,
       0,
       0
   );
@@ -296,7 +303,9 @@ void FScene::UpdatePointLight(FLightConstants &LightConstants,
 }
 
 void FScene::UpdateSpotLight(FLightConstants &LightConstants,
-                             USpotLightComponent *LightComponent) {
+                             USpotLightComponent *LightComponent,
+                            float TransitionFactor)
+{
   static FSpotLight SpotData{};
 
   FTransform WorldTransform;
@@ -351,9 +360,12 @@ void FScene::UpdateSpotLight(FLightConstants &LightConstants,
                                               1.f / static_cast<float>(LightComponent->GetShadowMapWidth()),
                                               LightComponent->GetCastShadows() ? 1.f : 0.f);
 
+  const float Bias = std::max<float>(LightComponent->GetShadowDepthBias(), 0.001f);
+  const float Size = std::max(TransitionFactor * Bias, 0.00001f);
+
   SpotData.ShadowFilterParameters = FVector4(
-      LightComponent->GetShadowSharpen() * 7 + 1,
-      std::max<float>(1, 0.001f), // TransitionSize로 나중에 바꿔야됨
+      std::clamp(LightComponent->GetShadowSharpen(), 0.0f, 1.0f) * 7 + 1,
+      1 / Size,
       0,
       0
   );
@@ -380,7 +392,10 @@ void FScene::UpdateAmbientLight(FLightConstants &LightConstants,
 
 void FScene::UpdateDirectionalLight(
     FLightConstants &LightConstants,
-    UDirectionalLightComponent *LightComponent) {
+    UDirectionalLightComponent *LightComponent,
+    float TransitionFactor
+)
+{
   // TODO : 디렉셔널 라이트가 여러 개 있으면, 우선순위(priority) 순으로 고르고,
   //  우선순위가 같으면 에디터용 경고 메시지를 띄우며 하나만 골라 Intensity에
   //  넣는다. 언리얼은 Defferred  방식이기 때문에 불투명 객체에 모든 Directional
@@ -427,9 +442,12 @@ void FScene::UpdateDirectionalLight(
 	  1.f / static_cast<float>(LightComponent->GetShadowMapWidth()),
 	  LightComponent->GetCastShadows() ? 1.f : 0.f);
 
+  const float Bias = std::max<float>(LightComponent->GetShadowDepthBias(), 0.001f);
+  const float Size = std::max(TransitionFactor * Bias, 0.00001f);
+
   DirectionalData.ShadowFilterParameters = FVector4(
-      LightComponent->GetShadowSharpen() * 7 + 1,
-      std::max<float>(1, 0.001f), // TransitionSize로 나중에 바꿔야됨
+      std::clamp(LightComponent->GetShadowSharpen(), 0.0f, 1.0f) * 7 + 1,
+      1 / Size,
       0,
       0
   );

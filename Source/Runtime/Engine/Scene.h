@@ -65,8 +65,8 @@ public:
 	TArray<ULightComponentBase*> LightComponents;
 
 private:
-	void UpdatePointLight(FLightConstants& LightConstants, UPointLightComponent* LightComponent);
-	void UpdateSpotLight(FLightConstants& LightConstants, USpotLightComponent* LightComponent);
+	void UpdatePointLight(FLightConstants& LightConstants, UPointLightComponent* LightComponent, float TransitionFactor);
+    void UpdateSpotLight(FLightConstants &LightConstants, USpotLightComponent *LightComponent, float TransitionFactor);
 	void UpdateAmbientLight(FLightConstants& LightConstants, UAmbientLightComponent* LightComponent);
-	void UpdateDirectionalLight(FLightConstants& LightConstants, UDirectionalLightComponent* LightComponent);
+	void UpdateDirectionalLight(FLightConstants& LightConstants, UDirectionalLightComponent* LightComponent, float TransitionFactor);
 };

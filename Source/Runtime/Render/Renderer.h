@@ -59,7 +59,7 @@ struct alignas(16) FPointLight
 	FVector4 ColorIntensity = FVector4(0, 0, 0, 0); // rgb: 색상, w: 강도
 	FVector4 FalloffEnabled = FVector4(1, 0, 0, 0); // x: 반경 감쇠, y: 사용 여부, zw: 패딩
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
+    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
 };
 static_assert(sizeof(FPointLight) == 80, "FPointLight must be 80 bytes");
 
@@ -72,7 +72,7 @@ struct alignas(16) FSpotLight
 	FVector4 ForwardVector = FVector4(1, 0, 0, 0);		// xyz : 전방벡터
     FMatrix ViewProjection;                            // ViewProjection 행렬. 그림자 맵을 만들 때 사용
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
+    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
 };
 static_assert(sizeof(FSpotLight) == 176, "FSpotLight must be 176 bytes");
 
@@ -87,7 +87,7 @@ struct alignas(16) FDirectionalLight
 	FVector4 Direction;		 // xyz : 광선 방향(World)
 	FMatrix ViewProjection;	 // ViewProjection 행렬. 그림자 맵을 만들 때 사용
 	FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
+    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
 };
 
 static_assert(sizeof(FDirectionalLight) == 128, "FDirectionalLight must be 128 bytes");
@@ -159,6 +159,8 @@ public:
 
 	void SetLight(const FLightConstants& LightData);
     void SetShadowQuality(const uint32 &InShadowQuality){ ShadowQuality = InShadowQuality; }
+    float GetTransitionFactor(){ return TransitionFactor; }
+    void SetTransitionFactor(const float&InTransitionFactor){ TransitionFactor = InTransitionFactor; }
 
     // 광원별 DSV와 Light VP를 받아 공통 Shadow Depth Pass를 실행한다.
     bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc& Desc, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters = nullptr);
@@ -280,7 +282,8 @@ private:
 	TUniquePtr<FConstantBuffer> LightCB;
 	FLightConstants LightData{};
 
-    uint32 ShadowQuality = 0;
+    uint32  ShadowQuality = 0;
+    float TransitionFactor = 2;
 
 	//CS, PS가 읽는 동적 StructuredBuffer
 	ComPtr<ID3D11Buffer> PointLightBuffer;
