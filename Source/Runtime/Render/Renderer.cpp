@@ -1325,72 +1325,72 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
 
 void FRenderer::RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
 {
-    // TODO : Atlas 도입시에 SpotLightCount > 1일 경우도 처리해야 한다.
-    // 그림자를 만드는 Spot은 0번 하나뿐이다
-    if (LightData.SpotLightCount == 0 || LightData.SpotLights[0].ShadowParameters.W <= 0.0f)
-        return;
+    //// TODO : Atlas 도입시에 SpotLightCount > 1일 경우도 처리해야 한다.
+    //// 그림자를 만드는 Spot은 0번 하나뿐이다
+    //if (LightData.SpotLightCount == 0 || LightData.SpotLights[0].ShadowParameters.W <= 0.0f)
+    //    return;
 
-    FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetSpotShadowMap() : nullptr;
-    if (!ShadowMap || !ShadowMap->GetDSV())
-        return;
+    //FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetSpotShadowMap() : nullptr;
+    //if (!ShadowMap || !ShadowMap->GetDSV())
+    //    return;
 
-    // 같은 텍스처를 SRV와 DSV로 동시에 바인딩하지 않도록 해제 (Gouraud는 VS에서도 읽는다)
-    RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    //// 같은 텍스처를 SRV와 DSV로 동시에 바인딩하지 않도록 해제 (Gouraud는 VS에서도 읽는다)
+    //RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
-    const FMatrix &LightVP = LightData.SpotLights[0].ViewProjection;
+    //const FMatrix &LightVP = LightData.SpotLights[0].ViewProjection;
 
-    FShadowPassDesc Desc{};
-    Desc.DepthView = ShadowMap->GetDSV();
-    Desc.Width = ShadowMap->GetWidth();
-    Desc.Height = ShadowMap->GetHeight();
+    //FShadowPassDesc Desc{};
+    //Desc.DepthView = ShadowMap->GetDSV();
+    //Desc.Width = ShadowMap->GetWidth();
+    //Desc.Height = ShadowMap->GetHeight();
 
-    if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode))
-        return;
+    //if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode))
+    //    return;
 
-    // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
-    FViewConstants CameraViewConstants{};
-    CameraViewConstants.VP = CameraViewProjection;
-    CameraViewConstants.CameraPosition = CameraLocation;
-    RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
+    //// Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
+    //FViewConstants CameraViewConstants{};
+    //CameraViewConstants.VP = CameraViewProjection;
+    //CameraViewConstants.CameraPosition = CameraLocation;
+    //RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
 }
 
 void FRenderer::RenderPointShadowMap(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
 {
     // TODO : PointLightCount > 1일 경우도 처리해야 한다.
-    if (LightData.PointLightCount == 0 || LightData.PointLights[0].ShadowParameters.W <= 0.0f)
-    {
-        return;
-    }
+    //if (LightData.PointLightCount == 0 || LightData.PointLights[0].ShadowParameters.W <= 0.0f)
+    //{
+    //    return;
+    //}
 
-    FTextureCube *ShadowMap = ShadowRenderer ? ShadowRenderer->GetPointLightShadowMap() : nullptr;
-    if (!ShadowMap || !ShadowMap->GetFaceDSV(0))
-    {
-        return;
-    }
+    //FTextureCube *ShadowMap = ShadowRenderer ? ShadowRenderer->GetPointLightShadowMap() : nullptr;
+    //if (!ShadowMap || !ShadowMap->GetFaceDSV(0))
+    //{
+    //    return;
+    //}
 
-    RenderCommand::UnbindShaderResource(12, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    //RenderCommand::UnbindShaderResource(12, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
-    const FVector LightPosition = FVector(LightData.PointLights[0].PositionRadius.X, LightData.PointLights[0].PositionRadius.Y, LightData.PointLights[0].PositionRadius.Z);
-    const float Far = LightData.PointLights[0].PositionRadius.W;
-    const float Near = 0.1f;
+    //const FVector LightPosition = FVector(LightData.PointLights[0].PositionRadius.X, LightData.PointLights[0].PositionRadius.Y, LightData.PointLights[0].PositionRadius.Z);
+    //const float Far = LightData.PointLights[0].PositionRadius.W;
+    //const float Near = 0.1f;
 
-    for (uint32 face = 0; face < 6; face++)
-    {
-        FShadowPassDesc Desc{};
-        Desc.DepthView = ShadowMap->GetFaceDSV(face);
-        Desc.Width = ShadowMap->GetWidth();
-        Desc.Height = ShadowMap->GetHeight();
+    //for (uint32 face = 0; face < 6; face++)
+    //{
+    //    FShadowPassDesc Desc{};
+    //    Desc.DepthView = ShadowMap->GetFaceDSV(face);
+    //    Desc.Width = ShadowMap->GetWidth();
+    //    Desc.Height = ShadowMap->GetHeight();
 
-        const FMatrix FaceLightVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, face);
+    //    const FMatrix FaceLightVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, face);
 
-        RenderShadowDepth(Scene, Desc, FaceLightVP, ViewMode);
-    }
+    //    RenderShadowDepth(Scene, Desc, FaceLightVP, ViewMode);
+    //}
 
-    // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
-    FViewConstants CameraViewConstants{};
-    CameraViewConstants.VP = CameraViewProjection;
-    CameraViewConstants.CameraPosition = CameraLocation;
-    RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
+    //// Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
+    //FViewConstants CameraViewConstants{};
+    //CameraViewConstants.VP = CameraViewProjection;
+    //CameraViewConstants.CameraPosition = CameraLocation;
+    //RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
 }
 
 void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode)
@@ -1402,7 +1402,6 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
     }
 
     RenderCommand::UnbindShaderResource(14, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // ShadowMapAtlasBuffer
-
 
     ShadowRenderer->GetShadowAtlasAllocator().Reset();
 
@@ -1452,13 +1451,13 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
 
             if( ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile) )
             {
-                uint32 InnerX = ShadowAtlasTile.X + SHADOW_ATLAS_BORDER;
-                uint32 InnerY = ShadowAtlasTile.Y + SHADOW_ATLAS_BORDER;
+                uint32 InnerX = ShadowAtlasTile.X;
+                uint32 InnerY = ShadowAtlasTile.Y;
                 uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;                
 
                 ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
 
-                FMatrix FaceVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, face);
+                FMatrix FaceVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, InnerSize, face);
                 LightData.PointLights[i].ViewProjection[face] = FaceVP;
                 LightData.PointLights[i].AtlasScaleOffset[face] = { (float)InnerSize / AtlasSize, (float)InnerSize / AtlasSize, (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; //UV
                 LightData.PointLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
