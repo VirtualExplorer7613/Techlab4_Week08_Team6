@@ -69,11 +69,11 @@ void FOutputLogPanel::OnRender()
 	ImGui::Checkbox("Auto-scroll", &AutoScroll);
 
 	ImGui::SameLine();
-	if (ImGui::SmallButton("Clear"))
+	if (ImGui::Button("Clear"))
 		ClearLog();
 
 	ImGui::SameLine();
-	bool CopyToClipboard = ImGui::SmallButton("Copy");
+	bool CopyToClipboard = ImGui::Button("Copy");
 
 	ImGui::Separator();
 
