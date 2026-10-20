@@ -2,7 +2,7 @@
 #include "Editor/Viewports/ViewportsPanel.h"
 #include "Editor/LevelEditor/MultipleViewports/Adapter/MultipleViewportsAdapter.h"
 
-#include "Core/StatOverlay.h"
+#include "Core/Stats/StatOverlay.h"
 #include "Core/Stats/LightweightStats.h"
 #include "Render/RenderCommand.h"
 
@@ -11,6 +11,7 @@
 #include <format>
 
 #include "Core/Stats/EditorStats.h"
+#include "Core/Stats/ShadowStats.h"
 
 namespace
 {
@@ -315,7 +316,7 @@ void FViewportsPanel::OnRender()
 		if (CurrentLayoutMode == ELayoutMode::QuadSplit)
 		{
 			PlaceToolbarItem(ButtonWidth("Single"));
-			if (ImGui::SmallButton("Single"))
+			if (ImGui::Button("Single"))
 			{
 				RequestedLayoutMode = ELayoutMode::Single;
 				RequestedSingleViewIndex = ViewIndex;
@@ -325,7 +326,7 @@ void FViewportsPanel::OnRender()
 		else if (ViewIndex == CurrentSingleViewIndex)
 		{
 			PlaceToolbarItem(ButtonWidth("Quad"));
-			if (ImGui::SmallButton("Quad"))
+			if (ImGui::Button("Quad"))
 			{
 				RequestedLayoutMode = ELayoutMode::QuadSplit;
 				RequestedSingleViewIndex = ViewIndex;
@@ -335,10 +336,10 @@ void FViewportsPanel::OnRender()
 		if (ViewportAdapter && ViewIndex == ViewportAdapter->GetEditorViewIndex() &&
 			FStatOverlay::IsAnyEnabled() &&
 			(FStatOverlay::IsEnabled(EStatFlags::Profile) ||
-				FStatRegistry::Find(EditorStats::STAT_PickingTime)))
+				FStatOverlay::IsEnabled(EStatFlags::Shadow)))
 		{
 			PlaceToolbarItem(ButtonWidth("Reset Stats"));
-			if (ImGui::SmallButton("Reset Stats"))
+			if (ImGui::Button("Reset Stats"))
 				FStatRegistry::Reset();
 			StatResetButtonMin = ImGui::GetItemRectMin();
 			StatResetButtonMax = ImGui::GetItemRectMax();
@@ -413,7 +414,15 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 
 		for (const auto& [Name, Data] : FStatRegistry::GetAll())
 		{
-			if (TStatId{ Name } == EditorStats::STAT_PickingTime)
+			const TStatId StatId{ Name };
+
+			if (StatId == EditorStats::STAT_PickingTime)
+				continue;
+
+			if (FStatOverlay::IsEnabled(EStatFlags::Shadow) &&
+				(StatId == ShadowStats::STAT_ShadowDirectional ||
+					StatId == ShadowStats::STAT_ShadowAtlas ||
+					StatId == ShadowStats::STAT_ShadowCSM))
 				continue;
 
 			FProfileStatLine Line{"  " + FString(Name), ValueColor};
@@ -424,14 +433,37 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 		}
 	}
 
+    if (FStatOverlay::IsEnabled(EStatFlags::Shadow))
+    {
+        ProfileLines.Add({"Shadow CPU (ms)", TitleColor, {"Last", "Avg", "Max"}});
+
+        const auto AddShadowStat = [&ProfileLines](const char *Label, TStatId StatId) {
+            const FCycleStatData *Data = FStatRegistry::Find(StatId);
+
+            FProfileStatLine Line{"  " + FString(Label), ValueColor};
+            Line.Values[0] = std::format("{:.2f}", Data ? Data->GetLastMs() : 0.0);
+            Line.Values[1] = std::format("{:.2f}", Data ? Data->GetRecentAverageMs() : 0.0);
+            Line.Values[2] = std::format("{:.2f}", Data ? Data->GetMaxMs() : 0.0);
+
+            ProfileLines.Add(Line);
+        };
+
+        AddShadowStat("Directional", ShadowStats::STAT_ShadowDirectional);
+        AddShadowStat("Atlas", ShadowStats::STAT_ShadowAtlas);
+        AddShadowStat("CSM", ShadowStats::STAT_ShadowCSM);
+    }
+
 	if (const FCycleStatData* PickingData = FStatRegistry::Find(EditorStats::STAT_PickingTime))
 	{
-		ProfileLines.Add({ "Picking", TitleColor });
-		FProfileStatLine Line{"  Time (ms)", ValueColor};
-		Line.Values[0] = std::format("Last: {:.2f}", PickingData->GetLastMs());
-		Line.Values[1] = std::format("Attempts: {}", PickingData->CallCount);
-		Line.Values[2] = std::format("Acc.: {:.2f}", PickingData->GetTotalMs());
-		ProfileLines.Add(Line);
+		if (const FCycleStatData* PickingData = FStatRegistry::Find(EditorStats::STAT_PickingTime))
+		{
+			ProfileLines.Add({ "Picking", TitleColor });
+			FProfileStatLine Line{"  Time (ms)", ValueColor};
+			Line.Values[0] = std::format("Last: {:.2f}", PickingData->GetLastMs());
+			Line.Values[1] = std::format("Attempts: {}", PickingData->CallCount);
+			Line.Values[2] = std::format("Acc.: {:.2f}", PickingData->GetTotalMs());
+			ProfileLines.Add(Line);
+		}
 	}
 
 	if (Lines.Num() == 0 && ProfileLines.Num() == 0)

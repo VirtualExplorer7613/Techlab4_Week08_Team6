@@ -9,6 +9,70 @@
 static const float PI = 3.14159265359f;
 static const float3 Ks = float3(0.04f, 0.04f, 0.04f);
 
+static const float2 DiscSamples5[] =
+{ // 5 random points in disc with radius 2.500000
+    float2(0.000000, 2.500000),
+	float2(2.377641, 0.772542),
+	float2(1.469463, -2.022543),
+	float2(-1.469463, -2.022542),
+	float2(-2.377641, 0.772543),
+};
+
+static const float2 DiscSamples12[] =
+{ // 12 random points in disc with radius 2.500000
+    float2(0.000000, 2.500000),
+	float2(1.767767, 1.767767),
+	float2(2.500000, -0.000000),
+	float2(1.767767, -1.767767),
+	float2(-0.000000, -2.500000),
+	float2(-1.767767, -1.767767),
+	float2(-2.500000, 0.000000),
+	float2(-1.767766, 1.767768),
+	float2(-1.006119, -0.396207),
+	float2(1.000015, 0.427335),
+	float2(0.416807, -1.006577),
+	float2(-0.408872, 1.024430),
+};
+
+static const float2 DiscSamples29[] =
+{ // 29 random points in disc with radius 2.500000
+    float2(0.000000, 2.500000),
+	float2(1.016842, 2.283864),
+	float2(1.857862, 1.672826),
+	float2(2.377641, 0.772542),
+	float2(2.486305, -0.261321),
+	float2(2.165063, -1.250000),
+	float2(1.469463, -2.022543),
+	float2(0.519779, -2.445369),
+	float2(-0.519779, -2.445369),
+	float2(-1.469463, -2.022542),
+	float2(-2.165064, -1.250000),
+	float2(-2.486305, -0.261321),
+	float2(-2.377641, 0.772543),
+	float2(-1.857862, 1.672827),
+	float2(-1.016841, 2.283864),
+	float2(0.091021, -0.642186),
+	float2(0.698035, 0.100940),
+	float2(0.959731, -1.169393),
+	float2(-1.053880, 1.180380),
+	float2(-1.479156, -0.606937),
+	float2(-0.839488, -1.320002),
+	float2(1.438566, 0.705359),
+	float2(0.067064, -1.605197),
+	float2(0.728706, 1.344722),
+	float2(1.521424, -0.380184),
+	float2(-0.199515, 1.590091),
+	float2(-1.524323, 0.364010),
+	float2(-0.692694, -0.086749),
+	float2(-0.082476, 0.654088),
+};
+
+#define SHADOW_QUALITY_LOW          0
+#define SHADOW_QUALITY_MEDIUM       1
+#define SHADOW_QUALITY_HIGH         2
+#define SHADOW_QUALITY_EPIC         3
+#define SHADOW_QUALITY_BOX3X3       4
+
 cbuffer Viewconstants : register(b0)
 {
     matrix VP;
@@ -42,6 +106,7 @@ struct FPointLightInfo
     float4 ColorIntensity;
     float4 FalloffEnabled;
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
     matrix ViewProjection[6];
     float4 AtlasScaleOffset[6]; // xy : scale, zw : offset
 };
@@ -55,6 +120,7 @@ struct FSpotLightInfo
     float4 FowardVector;
     matrix ViewProjection;    
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
     float4 AtlasScaleOffset; // xy : scale, zw : offset
 };
 
@@ -68,7 +134,8 @@ struct FDirectionalLightInfo
     float4 ColorIntensity;
     float4 Direction;
     matrix LightVP;
-    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shadow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
 };
 
 // 개수가 하나뿐인 라이트와 로컬 라이트 개수만 cbuffer에 둔다 (C++ FLightGlobalConstants와 같은 레이아웃)
@@ -79,7 +146,7 @@ cbuffer LightConstants : register(b3)
     uint PointLightCount;
     uint SpotLightCount;
     uint bShowShadows;
-    uint LightPadding;
+    uint ShadowQuality;
 };
 
 // 로컬 라이트 배열은 개수 제한이 없고 인덱스가 달라도 느려지지 않는 StructuredBuffer로 읽는다.
@@ -88,9 +155,7 @@ StructuredBuffer<FPointLightInfo> PointLights : register(t8);
 StructuredBuffer<FSpotLightInfo> SpotLights : register(t9);
 
 Texture2D<float> DirectionalShadowMap : register(t10);
-Texture2D<float> SpotShadowMap : register(t11);
 Texture2DArray<float> CascadeShadowMap : register(t13);
-TextureCube<float> PointShadowMap : register(t12);
 Texture2D<float> ShadowMapAtlas : register(t14);
 
 cbuffer TileBasedCullingConstants : register(b4)
@@ -132,7 +197,8 @@ StructuredBuffer<uint> TileLightIndices : register(t2);
 
 Texture2D g_txColor : register(t0);
 SamplerState g_Sample : register(s0);
-SamplerState g_SampleShadow : register(s1);
+SamplerState g_SamplePointBorder : register(s1);
+SamplerComparisonState g_SampleLinearComparison : register(s2);
 Texture2D g_txNormal : register(t3); // CPU에서 Textures[1]에 저장한 normal texture\
 
 // ACES Filmic Tone Mapping
@@ -182,7 +248,152 @@ FLightResult BlinnPhong(float3 N, float3 L, float3 V, float3 Radiance)
     return Result;
 }
 
-float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint index)
+float Gather1X1(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
+{   
+    float2 texelPos = (shadowPos.xy / invMapSize) - 0.5f;
+    float2 base = floor(texelPos);
+    float2 fraction = frac(texelPos);
+
+    float2 gatherUV = (base + 1) * invMapSize;
+
+    float4 depth = ShadowMap.Gather(g_SamplePointBorder, gatherUV); // x = 왼쪽 아래, y = 오른쪽 아래, z = 오른쪽 위, w = 왼쪽 위
+
+    float4 lit = saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
+
+    float top = lerp(lit.w, lit.z, fraction.x);
+    float bottom = lerp(lit.x, lit.y, fraction.x);
+
+    return lerp(top, bottom, fraction.y);
+}
+
+float Gather3X3(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
+{
+    float visibility = 0;
+    float recieveDepth = shadowPos.z - bias;
+
+    
+    float2 texelPos = (shadowPos.xy / invMapSize) - 0.5f;
+    float2 base = floor(texelPos);
+    float2 fraction = frac(texelPos);
+
+    float4 colWeight = { 1 - fraction.x, 1, 1, fraction.x };
+    float4 rowWeight = { 1 - fraction.y, 1, 1, fraction.y };
+    
+
+    for (int bx = 0; bx < 2; bx++)
+    {
+        for (int by = 0; by < 2; by++)
+        {
+            float2 gatherUV = (base + (float2(bx, by) * 2)) * invMapSize;
+
+            float4 depth = ShadowMap.Gather(g_SamplePointBorder, gatherUV); // x = 왼쪽 아래, y = 오른쪽 아래, z = 오른쪽 위, w = 왼쪽 위
+            
+
+            float4 lit = saturate((depth - (recieveDepth)) * TransitionScale + 1);
+
+            float2 col = bx == 0 ? colWeight.xy : colWeight.zw;
+            float2 row = by == 0 ? rowWeight.xy : rowWeight.zw;
+            float4 weight = { (row.y * col.x), (row.y * col.y), (row.x * col.y), (row.x * col.x), };
+            visibility += dot(lit, weight);
+        }
+    }
+    return visibility /= 9.0f;
+}
+
+float Gather5X5(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
+{
+    float visibility = 0;
+    float recieveDepth = shadowPos.z - bias;
+
+    
+    float2 texelPos = (shadowPos.xy / invMapSize) - 0.5f;
+    float2 base = floor(texelPos);
+    float2 fraction = frac(texelPos);
+
+    float2 colWeight[3] = { 1 - fraction.x, 1, 1, 1, 1, fraction.x };
+    float2 rowWeight[3] = { 1 - fraction.y, 1, 1, 1, 1, fraction.y };
+    
+
+    for (int bx = 0; bx < 3; bx++)
+    {
+        for (int by = 0; by < 3; by++)
+        {
+            float2 gatherUV = (base - 1 + (float2(bx, by) * 2)) * invMapSize;
+
+            float4 depth = ShadowMap.Gather(g_SamplePointBorder, gatherUV); // x = 왼쪽 아래, y = 오른쪽 아래, z = 오른쪽 위, w = 왼쪽 위
+            
+
+            float4 lit = saturate((depth - (recieveDepth)) * TransitionScale + 1);
+
+            float2 col = bx == 0 ? colWeight[0] : bx == 1 ? colWeight[1] : colWeight[2];
+            float2 row = by == 0 ? rowWeight[0] : by == 1 ? rowWeight[1] : rowWeight[2];
+            float4 weight = { (row.y * col.x), (row.y * col.y), (row.x * col.y), (row.x * col.x), };
+            visibility += dot(lit, weight);
+        }
+    }
+    return visibility /= 25.0f;
+}
+
+
+float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
+{   
+    float visibility = 0.0f;
+
+    [branch]
+    switch (ShadowQuality)
+    {
+        case SHADOW_QUALITY_LOW:
+        {
+            float depth = ShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy, 0);
+            
+            visibility += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
+            break;
+        }
+
+        case SHADOW_QUALITY_MEDIUM:
+        {
+            visibility = Gather1X1(ShadowMap, shadowPos, bias, invMapSize, TransitionScale);
+            break;   
+        }
+        
+        case SHADOW_QUALITY_HIGH:
+        {
+            visibility = Gather3X3(ShadowMap, shadowPos, bias, invMapSize, TransitionScale);
+            break;
+        }
+            
+        case SHADOW_QUALITY_EPIC:
+        {
+            visibility = Gather5X5(ShadowMap, texelSize, shadowPos, bias, invMapSize, TransitionScale);
+            break;
+        }
+            
+        case SHADOW_QUALITY_BOX3X3:
+        {
+            for (int x = -1; x <= 1; ++x)
+            {
+                for (int y = -1; y <= 1; ++y)
+                {
+                    float2 offset = float2(x, y) * texelSize;
+                    float depth = ShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy + offset, 0);
+                    visibility += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
+                }
+            }
+            visibility /= 9.0f;
+            break;
+        }
+        default:
+        {
+            float depth = ShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy, 0);
+            visibility += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
+            break;
+        }
+    }
+    
+    return visibility;
+}
+
+float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint index, float invMapSize, float TransitionScale)
 {
     if (bShowShadows == 0)
         return 1.0f;
@@ -258,15 +469,11 @@ float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint
     float2 texelSize = float2(PointLights[index].ShadowParameters.z, PointLights[index].ShadowParameters.z);
 
     float bias = PointLights[index].ShadowParameters.x + PointLights[index].ShadowParameters.y * (1.0f - NdotL);
-    
-    float visibility = 0.0f;
 
-    // Did not PCF
-    float depth = ShadowMapAtlas.SampleLevel(g_SampleShadow, shadowPos.xy, 0);
-    visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
-    
-    return visibility;
-    }
+    return ShadowFiltering2D(ShadowMapAtlas, texelSize, shadowPos, bias, invMapSize, TransitionScale);
+    //return ShadowFilteringCube(ShadowMapAtlas, lightToPixel, projDepth, bias, invMapSize);
+
+}
 
 FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
 {
@@ -287,7 +494,9 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
 
     FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
 
-    float Shadow = CalculatePointShadow(worldPos, info.PositionRadius.xyz, normal, index);
+    float Shadow = CalculatePointShadow(worldPos, info.PositionRadius.xyz, normal, index, info.ShadowParameters.z, info.ShadowFilterParameters.y);
+    
+    Shadow = saturate((Shadow - 0.5) * info.ShadowFilterParameters.x + 0.5);
 
     Result.Diffuse *= Shadow;
     Result.Specular *= Shadow;
@@ -295,7 +504,7 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
     return Result;
 }
 
-float CalculateSpotShadow(float3 worldPos, float3 normal, uint index)
+float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLightInfo info)
 {
     if (bShowShadows == 0)
         return 1.0f;
@@ -331,19 +540,7 @@ float CalculateSpotShadow(float3 worldPos, float3 normal, uint index)
     float NdotL = saturate(dot(normal, lightDir));
     
     float bias = SpotLights[index].ShadowParameters.x + SpotLights[index].ShadowParameters.y * (1.0f - NdotL);
-    
-    float visibility = 0.0f;
-    for (int x = -1; x <= 1; ++x)
-    {
-        for (int y = -1; y <= 1; ++y)
-        {
-            float2 offset = float2(x, y) * texelSize;
-            float depth = ShadowMapAtlas.SampleLevel(g_SampleShadow, shadowPos.xy + offset, 0);
-            visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
-        }
-    }
-    visibility /= 9.0f;
-    return visibility;
+    return ShadowFiltering2D(ShadowMapAtlas, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
 }
 
 FLightResult CalculateSpotLight(FSpotLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
@@ -372,7 +569,11 @@ FLightResult CalculateSpotLight(FSpotLightInfo info, float3 worldPos, float3 nor
     float enabled = FalloffEnabled.y;
     float3 radiance = ColorIntensity.rgb * ColorIntensity.w * falloff * enabled;
 
-    float Shadow = CalculateSpotShadow(worldPos, normal, index);
+    float Shadow = CalculateSpotShadow(worldPos, normal, index, info);
+
+    Shadow = saturate((Shadow - 0.5) * info.ShadowFilterParameters.x + 0.5);
+
+    
     FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
     Result.Diffuse = Result.Diffuse * Shadow;
     Result.Specular = Result.Specular * Shadow;
@@ -474,7 +675,7 @@ float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentV
             // 텍셀 단위 이동을 UV 단위로 변환
             float2 offset = float2(x, y) * texelSize;
 
-            float depth = CascadeShadowMap.SampleLevel(g_SampleShadow, float3(nextPos.xy + offset, (float) nextIndex), 0);
+            float depth = CascadeShadowMap.SampleLevel(g_SamplePointBorder, float3(nextPos.xy + offset, (float) nextIndex), 0);
 
             nextVisibility += (nextPos.z - bias) <= depth ? 1.0f : 0.0f;
         }
@@ -487,7 +688,7 @@ float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentV
     
 }
 
-float CalculateDirectionalShadow(float3 worldPos, float3 normal)
+float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLightInfo info)
 {
     if (bShowShadows == 0)
         return 1.0f;
@@ -506,7 +707,6 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal)
         shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
     }
     
-    // float4 shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
     shadowPos.xyz /= shadowPos.w; // W divde
     shadowPos.x = shadowPos.x * 0.5f + 0.5f;
     shadowPos.y = -shadowPos.y * 0.5f + 0.5f;
@@ -523,9 +723,6 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal)
     }
 
     float invResolution = useCascade ? CascadeInvResolution : DirectionalLight.ShadowParameters.z;
-    //float invResolution = DirectionalLight.ShadowParameters.z;
-
-    //float2 texelSize = float2(DirectionalLight.ShadowParameters.z, DirectionalLight.ShadowParameters.z);
 
     float2 texelSize = float2(invResolution, invResolution);
     
@@ -534,28 +731,36 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal)
     float bias = DirectionalLight.ShadowParameters.x + DirectionalLight.ShadowParameters.y * (1.0f - NdotL);
     
     float visibility = 0.0f;
-    for (int x = -1; x <= 1; ++x)
-    {
-        for (int y = -1; y <= 1; ++y)
-        {
-            float2 offset = float2(x, y) * texelSize;
-            float depth;
-            if (useCascade)
-            {
-                depth = CascadeShadowMap.SampleLevel(g_SampleShadow, float3(shadowPos.xy + offset, (float) cascadeIndex), 0);
-            }
-            else
-            {
-                depth = DirectionalShadowMap.SampleLevel(g_SampleShadow, shadowPos.xy + offset, 0);
-            }
-            visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
-        }
-    }
-    visibility /= 9.0f;
+    
 
     if (useCascade)
-    {
+    {// todo 나중에 변경 shadow atlas
+        //visibility = ShadowFiltering2D(CascadeShadowMap, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
+        
+
+        for (int x = -1; x <= 1; ++x)
+        {
+            for (int y = -1; y <= 1; ++y)
+            {
+                float2 offset = float2(x, y) * texelSize;
+                float depth;
+                if (useCascade)
+                {
+                    depth = CascadeShadowMap.SampleLevel(g_SamplePointBorder, float3(shadowPos.xy + offset, (float) cascadeIndex), 0);
+                }
+                else
+                {
+                    depth = DirectionalShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy + offset, 0);
+                }
+                visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
+            }
+        }
+        visibility /= 9.0f;
         visibility = ApplyCascadeShadowBlend(worldPos, cascadeIndex, visibility, bias);
+    }
+    else
+    {
+        visibility = ShadowFiltering2D(DirectionalShadowMap, texelSize, shadowPos, bias, invResolution, info.ShadowFilterParameters.y);
     }
     
     return visibility;
@@ -569,8 +774,9 @@ FLightResult CalculateDirectionalLight(FDirectionalLightInfo info, float3 normal
 
     FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
 
-    float Shadow = CalculateDirectionalShadow(worldPos, normal);
-
+    float Shadow = CalculateDirectionalShadow(worldPos, normal, info);
+    Shadow = saturate((Shadow - 0.5) * info.ShadowFilterParameters.x + 0.5);
+    
     Result.Diffuse *= Shadow;
     Result.Specular *= Shadow;
     
@@ -661,7 +867,7 @@ float3 ApplyCascadeDebugColor(float3 shadedColor, float3 worldPos, float3 normal
     if (NdotL <= 0.0f)
         return shadedColor;
     
-    float visibility = CalculateDirectionalShadow(worldPos, normal);
+    float visibility = CalculateDirectionalShadow(worldPos, normal, DirectionalLight);
     float shadowAmount = saturate(1.0f - visibility);
 
     uint cascadeIndex = SelectDebugCascade(worldPos);
@@ -804,7 +1010,7 @@ float4 mainPS(PS_INPUT input) : SV_TARGET
     
 #if LIGHTING_MODEL_PHONG
     finalRGB =  finalRGB * (ambient + Light.Diffuse) + Light.Specular;
- #else
+#else
     finalRGB = finalRGB * (ambient + Light.Diffuse);
 #endif
     finalRGB = ACESFilmicToneMapping(finalRGB);

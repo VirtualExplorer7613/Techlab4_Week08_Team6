@@ -204,8 +204,8 @@ public:
     std::array<FVector, 8> LimitFrustumToShadowDistance(const std::array<FVector, 8>& Corners, float CameraNear, float CameraFar, float ShadowDistance) const;
 
     FMatrix BuildPointLightView(const FVector &LightPosition, uint32 FaceIndex) const;
-    FMatrix BuildPointLightProjection(float NearPlane, float FarPlane) const;
-    FMatrix BuildPointLightVP(const FVector &LightPosition, float NearPlane, float FarPlane, uint32 FaceIndex) const;
+    FMatrix BuildPointLightProjection(float NearPlane, float FarPlane, uint32 RequestedSize) const;
+    FMatrix BuildPointLightVP(const FVector &LightPosition, float NearPlane, float FarPlane, uint32 RequestedSize, uint32 FaceIndex) const;
 
     FTexture2D *GetDirectionalShadowMap() const { return DirectionalShadowMap.get(); }
     FTexture2D *GetSpotShadowMap() const { return SpotShadowMap.get(); }

@@ -18,6 +18,7 @@ class ULightComponentBase : public USceneComponent
 		PROPERTY(ShadowSlopeBias)		
 		PROPERTY(FarPlane)
 		PROPERTY(NearPlane)
+        PROPERTY(ShadowSharpen)
 	REFLECT_END()
 
 public:
@@ -49,6 +50,9 @@ public:
 	float GetNearPlane() const { return NearPlane; }
 	void SetNearPlane(float InNearPlane) { NearPlane = InNearPlane; }
 
+    float GetShadowSharpen() const { return ShadowSharpen; }
+	void SetShadowSharpen(float InShadowSharpen) { ShadowSharpen = InShadowSharpen; }
+
     FTexture2D *GetShadowMapTexture() const
     {
         return ShadowMapTexture;
@@ -70,6 +74,8 @@ private:
 	float ShadowMapWidth = 2048.0f;
 	float FarPlane = 250.0f;
 	float NearPlane = 10.0f;
+
+    float ShadowSharpen = 0;
 
     FTexture2D *ShadowMapTexture = nullptr;
 };
