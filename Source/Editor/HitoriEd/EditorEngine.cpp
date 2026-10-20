@@ -220,7 +220,14 @@ bool UEditorEngine::Init()
                 Renderer->SetCSMEnabled(bCSMEnabled);
             }
 
+            float Exponent = Renderer->GetCSMDistributionExponent();
+
             DrawCSMSettingsContent();
+
+            if (ImGui::DragFloat("Distribution Exponent", &Exponent, 0.05f, 0.1f, 10.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+            {
+                Renderer->SetCSMDistributionExponent(Exponent);
+            }
 
             bool bDebugColors = Renderer->GetCascadeDebugColors();
 

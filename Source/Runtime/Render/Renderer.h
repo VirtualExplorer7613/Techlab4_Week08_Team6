@@ -284,6 +284,17 @@ public:
 
     void UpdateCascadeDebugConstants(const FVector &CameraForward);
 
+    float GetCSMDistributionExponent() const
+    {
+        return CSMDistributionExponent;
+    }
+
+    void SetCSMDistributionExponent(float Value)
+    {
+        // UI 외부에서 변경해도 범위 보장
+        CSMDistributionExponent = Value < 0.1f ? 0.1f : (Value > 10.0f ? 10.0f : Value);
+    }
+
     void SetCSMEnabled(bool bEnabled)
     {
         bCSMEnabled = bEnabled;
@@ -390,6 +401,7 @@ private:
     FCascadeDebugConstants CascadeConstants{};
     bool bCSMEnabled = true;
     float CSMShadowDistance = 40.0f;
+    float CSMDistributionExponent = 3.0f;
 
     FCascadeShadowMaps CascadeShadowMaps;
     bool bCascadeDebugColors = false;

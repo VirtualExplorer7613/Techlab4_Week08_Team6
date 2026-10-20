@@ -294,7 +294,9 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
         const auto CameraCorners = GetFrustumCornersWorld(CameraViewProjection);
 
         // 현재 분할 정책 E = 3;
-        constexpr float DistributionExponent = 3.0f;
+        //constexpr float DistributionExponent = 3.0f;
+
+        const float DistributionExponent = CSMDistributionExponent;
 
         float TotalWeight = 0.0f;
         float Weight = 1.0f;
