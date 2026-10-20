@@ -261,7 +261,7 @@ bool UEditorEngine::Init()
         {
             ImGui::SeparatorText("Cascade Shadow Maps");
 
-            DrawCascadeShadowPreviewContent(Renderer->GetCascadePreviewMaps());
+            DrawCascadeShadowPreviewContent();
         }
 
         ImGui::PopID();
@@ -1364,51 +1364,40 @@ void UEditorEngine::SaveSceneAs()
 	FEditorFileUtils::SaveSceneAs(EditorWorld);
 }
 
-void UEditorEngine::DrawCascadeShadowPreviewContent(const FCascadeShadowMaps &Maps)
+void UEditorEngine::DrawCascadeShadowPreviewContent()
 {
-    const FString ShaderPath = "Resources/Shader/CascadeDepthPreview.hlsl";
+    const uint32 Count = Renderer->GetCascadePreviewCount();
 
-    FShaderProgram *Program = FRenderResourceManager::GetShaderProgram(ShaderPath);
-
-    if (!Program || Program->SourcePath != ShaderPath || !Program->PixelShader || !Program->PixelShader->IsValid())
+    if (Count == 0)
     {
-        ImGui::TextUnformatted("CascadeDepthPreview shader is unavailable.");
+        ImGui::TextUnformatted("No cascade preview captured.");
         return;
     }
 
-    ID3D11PixelShader *PixelShader = Program->PixelShader->GetShader();
+    ImGui::Text("%u cascades, preview %u x %u", Count, FRenderer::CascadePreviewResolution, FRenderer::CascadePreviewResolution);
 
-    ImGui::Text("%u cascades, %u x %u", Maps.GetCascadeCount(), Maps.GetResolution(), Maps.GetResolution());
+    if (!ImGui::BeginTable("CascadeImages", 2))
+        return;
 
-    if (ImGui::BeginTable("CascadeImages", 2))
+    for (uint32 Index = 0; Index < Count; ++Index)
     {
-        for (uint32 Index = 0; Index < Maps.GetCascadeCount(); ++Index)
+        ImGui::TableNextColumn();
+        ImGui::Text("Cascade %u", Index);
+
+        const FTexture2D *Texture = Renderer->GetCascadePreviewTexture(Index);
+
+        if (!Texture || !Texture->GetSRV())
         {
-            ImGui::TableNextColumn();
-            ImGui::Text("Cascade %u", Index);
-
-            ID3D11ShaderResourceView *SRV = Maps.GetSliceSRV(Index);
-
-            if (!SRV)
-            {
-                ImGui::TextUnformatted("No depth resource.");
-                continue;
-            }
-
-            const float Size = std::max(1.0f, std::min(200.0f, ImGui::GetContentRegionAvail().x));
-
-            ImDrawList *DrawList = ImGui::GetWindowDrawList();
-
-            DrawList->AddCallback(BindCascadePreviewPS, PixelShader);
-
-            ImGui::Image(reinterpret_cast<ImTextureID>(SRV), ImVec2(Size, Size));
-
-            DrawList->AddCallback(UnbindCascadePreviewSRV);
-            DrawList->AddCallback(ImGui::GetPlatformIO().DrawCallback_ResetRenderState);
+            ImGui::TextUnformatted("No preview resource.");
+            continue;
         }
 
-        ImGui::EndTable();
+        const float Size = std::max(1.0f, std::min(static_cast<float>(FRenderer::CascadePreviewResolution), ImGui::GetContentRegionAvail().x));
+
+        ImGui::Image(reinterpret_cast<ImTextureID>(Texture->GetSRV()), ImVec2(Size, Size));
     }
+
+    ImGui::EndTable();
 }
 
 void UEditorEngine::DrawCSMSettingsContent()

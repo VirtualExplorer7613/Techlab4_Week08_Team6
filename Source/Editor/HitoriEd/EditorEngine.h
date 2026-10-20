@@ -202,7 +202,7 @@ private:
 	void SaveCurrentScene();
 	void SaveSceneAs();
 
-    void DrawCascadeShadowPreviewContent(const FCascadeShadowMaps &Maps);
+    void DrawCascadeShadowPreviewContent();
     void DrawCSMSettingsContent();
     static void BindCascadePreviewPS(const ImDrawList *DrawList, const ImDrawCmd *Command);
     static void UnbindCascadePreviewSRV(const ImDrawList *DrawList, const ImDrawCmd *Command);
