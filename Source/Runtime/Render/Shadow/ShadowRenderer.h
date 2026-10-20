@@ -195,10 +195,10 @@ public:
     FMatrix BuildDirectionalLightProjection(const FBox& LightSpaceBounds) const;
 
     // 카메라 Frustum을 지정된 그림자 거리까지 제한해 Directional Light VP를 계산한다.
-    FMatrix BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection) const;
+    FMatrix BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection, uint32 ShadowResolution) const;
 
     // Frustum 코너 8개를 받아 Directional Light VP를 계산한다.
-    FMatrix BuildDirectionalLightVPFromCorners(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection, float MinCasterDepth = std::numeric_limits<float>::infinity()) const;
+    FMatrix BuildDirectionalLightVPFromCorners(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection, uint32 ShadowResolution, float MinCasterDepth = std::numeric_limits<float>::infinity()) const;
 
     // Frustum의 원거리 꼭짓점을 ShadowDistance에 맞춰 보간한다.
     std::array<FVector, 8> LimitFrustumToShadowDistance(const std::array<FVector, 8>& Corners, float CameraNear, float CameraFar, float ShadowDistance) const;
