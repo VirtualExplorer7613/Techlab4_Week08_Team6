@@ -115,8 +115,8 @@ struct alignas(16) FLightGlobalConstants
 	FDirectionalLight	DirectionalLight;
 	uint32 PointLightCount = 0;
 	uint32 SpotLightCount = 0;
-    uint32 ShadowQuality = 0;
     uint32 bShowShadows = 1;
+    uint32 ShadowQuality = 0;
 };
 static_assert(sizeof(FLightGlobalConstants) == 160, "FLightGlobalConstants must match UberLit LightConstants");
 
