@@ -532,6 +532,7 @@ void FRenderer::BindLightResources()
     RenderCommand::BindShaderResource(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindShaderResource(11, GetSpotShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindShaderResource(12, GetPointShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindShaderResource(14, GetShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindSamplerState(1, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
     RenderCommand::BindConstantBuffer(5, CascadeDebugCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
@@ -1274,6 +1275,8 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
 
     ShadowRenderer->BeginShadowPass(Desc);
 
+    float AtlasSize = ShadowMap->GetWidth();
+
     // PointLight Loop
     uint32 PointLightCount = LightData.PointLightCount;
     for (uint32 i = 0; i < PointLightCount; i++)
@@ -1313,13 +1316,14 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
             {
                 uint32 InnerX = ShadowAtlasTile.X + SHADOW_ATLAS_BORDER;
                 uint32 InnerY = ShadowAtlasTile.Y + SHADOW_ATLAS_BORDER;
-                uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;
+                uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;                
 
                 ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
 
                 FMatrix FaceVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, face);
-                LightData.PointLights[i].VeiwProjection[face] = FaceVP;
-                LightData.PointLights[i].AtlasScaleOffset[face] = {ShadowAtlasTile.Size, ShadowAtlasTile.Size, ShadowAtlasTile.X, ShadowAtlasTile.Y};
+                LightData.PointLights[i].ViewProjection[face] = FaceVP;
+                LightData.PointLights[i].AtlasScaleOffset[face] = { (float)InnerSize / AtlasSize, (float)InnerSize / AtlasSize, (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; //UV
+                LightData.PointLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
                 DrawShadowCasters(Scene, FaceVP, ViewMode, nullptr);
             }
@@ -1371,8 +1375,8 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
 
             ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
 
-            LightData.SpotLights[i].AtlasScaleOffset = { ShadowAtlasTile.Size, ShadowAtlasTile.Size, ShadowAtlasTile.X, ShadowAtlasTile.Y };
-            LightData.SpotLights[i].ShadowParameters.Z = 1.0f / (float)ShadowAtlasTile.Size;
+            LightData.SpotLights[i].AtlasScaleOffset = {(float) InnerSize / AtlasSize , (float)InnerSize / AtlasSize , (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; // UV
+            LightData.SpotLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
             DrawShadowCasters(Scene, LightData.SpotLights[i].ViewProjection, ViewMode, nullptr);
         }
@@ -1382,7 +1386,11 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
         }
     }
 
-    ShadowRenderer->EndShadowPass();
+    ShadowRenderer->EndShadowPass();    
+
+    // Upload Light data to buffer
+    UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight)* LightData.SpotLightCount);
+    UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight)* LightData.PointLightCount);
 
     // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
     FViewConstants CameraViewConstants{};

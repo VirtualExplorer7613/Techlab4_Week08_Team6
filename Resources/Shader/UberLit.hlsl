@@ -90,6 +90,7 @@ Texture2D<float> DirectionalShadowMap : register(t10);
 Texture2D<float> SpotShadowMap : register(t11);
 Texture2DArray<float> CascadeShadowMap : register(t13);
 TextureCube<float> PointShadowMap : register(t12);
+Texture2D<float> ShadowMapAtlas : register(t14);
 
 cbuffer TileBasedCullingConstants : register(b4)
 {
@@ -182,36 +183,86 @@ FLightResult BlinnPhong(float3 N, float3 L, float3 V, float3 Radiance)
 
 float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint index)
 {
-    // TODO : 여러개 지원 해야함
-    if (index != 0 || PointLights[0].ShadowParameters.w == 0 || bReceiveShadow == 0)
+    if (PointLights[index].ShadowParameters.w == 0 || bReceiveShadow == 0)
     {
         return 1.0f;
     }
 
     float3 lightToPixel = worldPos - lightPos;    
-    if (length(lightToPixel) > PointLights[0].PositionRadius.w)
+    if (length(lightToPixel) > PointLights[index].PositionRadius.w)
     {
         return 1.0f;
     }
 
     float near = 0.1f;
-    float far = PointLights[0].PositionRadius.w;
+    float far = PointLights[index].PositionRadius.w;
     float viewDepth = max(abs(lightToPixel.x), max(abs(lightToPixel.y), abs(lightToPixel.z)));
     float projDepth = far / (far - near) - (near * far) / ((far - near) * viewDepth);
 
-    float NdotL = saturate(dot(normal, -normalize(lightToPixel).xyz));
-    float2 texelSize = float2(PointLights[0].ShadowParameters.z, PointLights[0].ShadowParameters.z);
+    uint faceIndex = 0;
+    
+    // Find pixel face
+    if (viewDepth == abs(lightToPixel.x))
+    {
+        if (lightToPixel.x > 0)
+            faceIndex = 0;
+        else
+            faceIndex = 1;
 
-    float bias = PointLights[0].ShadowParameters.x + PointLights[0].ShadowParameters.y * (1.0f - NdotL);
+    }
+    else if (viewDepth == abs(lightToPixel.y))
+    {
+        if (lightToPixel.y > 0)
+            faceIndex = 2;
+        else
+            faceIndex = 3;
+    }
+    else
+    {
+        if (lightToPixel.z > 0)
+            faceIndex = 4;
+        else
+            faceIndex = 5;
+    }
+
+    if (PointLights[index].AtlasScaleOffset[faceIndex].x <= 0.0f)
+        return 1.0f;
+
+    float4 shadowPos = mul(float4(worldPos.xyz, 1.0f), PointLights[index].ViewProjection[faceIndex]);
+    if (shadowPos.w <= 0)
+    {
+        return 1;
+    }
+    shadowPos.xyz /= shadowPos.w; // W divde
+    shadowPos.x = shadowPos.x * 0.5f + 0.5f;
+    shadowPos.y = -shadowPos.y * 0.5f + 0.5f;
+
+    // 뷰포트 밖이면 그림자 없음
+    if (shadowPos.x < 0.0f || shadowPos.x > 1.0f || shadowPos.y < 0.0f || shadowPos.y > 1.0f)
+    {
+        return 1.0f;
+    }
+
+    shadowPos.xy = shadowPos.xy * PointLights[index].AtlasScaleOffset[faceIndex].xy + PointLights[index].AtlasScaleOffset[faceIndex].zw;
+
+    if (PointLights[index].ShadowParameters.w == 0.0f || bReceiveShadow == 0)
+    {
+        return 1.0f;
+    }
+    
+    float NdotL = saturate(dot(normal, -normalize(lightToPixel).xyz));
+    float2 texelSize = float2(PointLights[index].ShadowParameters.z, PointLights[index].ShadowParameters.z);
+
+    float bias = PointLights[index].ShadowParameters.x + PointLights[index].ShadowParameters.y * (1.0f - NdotL);
     
     float visibility = 0.0f;
 
     // Did not PCF
-    float depth = PointShadowMap.SampleLevel(g_SampleShadow, lightToPixel, 0);
-    visibility += (projDepth - bias) <= depth ? 1.0f : 0.0f;
+    float depth = ShadowMapAtlas.SampleLevel(g_SampleShadow, shadowPos.xy, 0);
+    visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
     
     return visibility;
-}
+    }
 
 FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
 {
@@ -242,12 +293,7 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
 
 float CalculateSpotShadow(float3 worldPos, float3 normal, uint index)
 {
-    // TODO : 여러개 지원 해야함
-    if (index != 0)
-    {
-        return 1;
-    }
-    float4 shadowPos = mul(float4(worldPos, 1.0f), SpotLights[0].ViewProjection);
+    float4 shadowPos = mul(float4(worldPos, 1.0f), SpotLights[index].ViewProjection);
     if (shadowPos.w <= 0)
     {
         return 1;
@@ -262,20 +308,22 @@ float CalculateSpotShadow(float3 worldPos, float3 normal, uint index)
         return 1.0f;
     }
 
-    if (SpotLights[0].ShadowParameters.w == 0.0f || bReceiveShadow == 0)
+    shadowPos.xy = shadowPos.xy * SpotLights[index].AtlasScaleOffset.xy + SpotLights[index].AtlasScaleOffset.zw;
+
+    if (SpotLights[index].ShadowParameters.w == 0.0f || bReceiveShadow == 0)
     {
         return 1.0f;
     }
     
-    float2 texelSize = float2(SpotLights[0].ShadowParameters.z, SpotLights[0].ShadowParameters.z);
+    float2 texelSize = float2(SpotLights[index].ShadowParameters.z, SpotLights[index].ShadowParameters.z);
 
-    float3 toLight = SpotLights[0].PositionRadius.xyz - worldPos;
+    float3 toLight = SpotLights[index].PositionRadius.xyz - worldPos;
     float distance = length(toLight);
     float3 lightDir = toLight / max(distance, 0.0001f); // length를 한 번만 계산하고 0으로 나누기를 막는다
     
     float NdotL = saturate(dot(normal, lightDir));
     
-    float bias = SpotLights[0].ShadowParameters.x + SpotLights[0].ShadowParameters.y * (1.0f - NdotL);
+    float bias = SpotLights[index].ShadowParameters.x + SpotLights[index].ShadowParameters.y * (1.0f - NdotL);
     
     float visibility = 0.0f;
     for (int x = -1; x <= 1; ++x)
@@ -283,7 +331,7 @@ float CalculateSpotShadow(float3 worldPos, float3 normal, uint index)
         for (int y = -1; y <= 1; ++y)
         {
             float2 offset = float2(x, y) * texelSize;
-            float depth = SpotShadowMap.SampleLevel(g_SampleShadow, shadowPos.xy + offset, 0);
+            float depth = ShadowMapAtlas.SampleLevel(g_SampleShadow, shadowPos.xy + offset, 0);
             visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
         }
     }

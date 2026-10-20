@@ -60,7 +60,7 @@ struct alignas(16) FPointLight
 	FVector4 ColorIntensity = FVector4(0, 0, 0, 0); // rgb: 색상, w: 강도
 	FVector4 FalloffEnabled = FVector4(1, 0, 0, 0); // x: 반경 감쇠, y: 사용 여부, zw: 패딩
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    FMatrix VeiwProjection[6];
+    FMatrix ViewProjection[6];
     FVector4 AtlasScaleOffset[6]; // xy : scale, zw : offset
 };
 static_assert(sizeof(FPointLight) == 544, "FPointLight must be 544 bytes");
@@ -246,6 +246,10 @@ public:
     {
         return ShadowRenderer ? ShadowRenderer->GetPointLightShadowMap() : nullptr;
     }
+    FTexture2D* GetShadowMap() const
+    {
+        return ShadowRenderer ? ShadowRenderer->GetShadowMapAtlas() : nullptr;
+    }
 
     ID3D11ShaderResourceView *GetSpotShadowMapSRV() const
     {
@@ -257,6 +261,12 @@ public:
     {
         FTexture2D *DirectionalShadowMap = GetDirectionalShadowMap();
         return DirectionalShadowMap ? DirectionalShadowMap->GetSRV() : nullptr;
+    }
+
+    ID3D11ShaderResourceView* GetShadowMapSRV() const
+    {
+        FTexture2D* ShadowMap = GetShadowMap();
+        return ShadowMap ? ShadowMap->GetSRV() : nullptr;
     }
 
     const FCascadeShadowMaps &GetCascadeShadowMaps() const
