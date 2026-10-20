@@ -198,7 +198,6 @@ StructuredBuffer<uint> TileLightIndices : register(t2);
 Texture2D g_txColor : register(t0);
 SamplerState g_Sample : register(s0);
 SamplerState g_SamplePointBorder : register(s1);
-SamplerComparisonState g_SampleLinearComparison : register(s2);
 Texture2D g_txNormal : register(t3); // CPU에서 Textures[1]에 저장한 normal texture\
 
 // ACES Filmic Tone Mapping

@@ -616,7 +616,6 @@ void FRenderer::BindLightResources()
     RenderCommand::BindShaderResource(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindShaderResource(14, GetShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindSamplerState(1, ESamplerState::PointBorder, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindSamplerState(2, ESamplerState::LinearComparison, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindConstantBuffer(5, CascadeDebugCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     ID3D11ShaderResourceView *CascadeSRV = CascadeShadowMaps.GetArraySRV();
     Context->VSSetShaderResources(13, 1, &CascadeSRV);
