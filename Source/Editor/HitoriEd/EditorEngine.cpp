@@ -1015,11 +1015,14 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	//0. 정렬
 	if (MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Primitives))
 		Renderer->RenderQueueSorting(RenderQueue, ViewProjection, ViewCameraLocation);
+    
 
     const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
 
     if (bRenderShadows)
     {
+		Renderer->SetShadowQuality(Settings.ShadowQuality);
+		Renderer->SetTransitionFactor(Settings.TransitionFactor);
         Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
         //Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
         //Renderer->RenderPointShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);

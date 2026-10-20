@@ -604,6 +604,7 @@ bool FRenderer::ApplyPendingCSMSettings()
 void FRenderer::BindLightResources()
 {
 	RenderCommand::BindConstantBuffer(3, LightCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    
 
 	// Gouraud는 VS에서, 나머지 Lit은 PS에서 라이트를 읽으므로 두 스테이지에 모두 꽂는다.
 	constexpr uint32 LightSRVSlot = 8;   // UberLit의 register(t8), register(t9)
@@ -613,11 +614,9 @@ void FRenderer::BindLightResources()
 	Context->PSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 
     RenderCommand::BindShaderResource(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindShaderResource(11, GetSpotShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindShaderResource(12, GetPointShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindShaderResource(14, GetShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindSamplerState(1, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-
+    RenderCommand::BindSamplerState(1, ESamplerState::PointBorder, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindSamplerState(2, ESamplerState::LinearComparison, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindConstantBuffer(5, CascadeDebugCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     ID3D11ShaderResourceView *CascadeSRV = CascadeShadowMaps.GetArraySRV();
     Context->VSSetShaderResources(13, 1, &CascadeSRV);
@@ -1123,6 +1122,7 @@ void FRenderer::UploadLightGlobalConstants(const FMatrix &DirectionalLightVP)
     Globals.PointLightCount = LightData.PointLightCount;
     Globals.SpotLightCount = LightData.SpotLightCount;
     Globals.bShowShadows = bShadowsEnabled ? 1u : 0u;
+    Globals.ShadowQuality = ShadowQuality;
 
     RenderCommand::UpdateBufferData(LightCB.get(), &Globals, sizeof(FLightGlobalConstants));
 }
@@ -1401,8 +1401,8 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
         return;
     }
 
-    RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // SpotLight Buffer
-    RenderCommand::UnbindShaderResource(12, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // PointLight Buffer
+    RenderCommand::UnbindShaderResource(14, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // ShadowMapAtlasBuffer
+
 
     ShadowRenderer->GetShadowAtlasAllocator().Reset();
 
