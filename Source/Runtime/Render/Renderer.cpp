@@ -1789,9 +1789,7 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
 
     ShadowRenderer->BeginShadowPass(Desc);
 
-    float AtlasSize = ShadowMap->GetWidth();
-
-    uint32 ShadowQualityShift = static_cast<uint32>(ShadowResolutionQuality);
+    float AtlasSize = ShadowMap->GetWidth();    
 
     float CotanHalfFOV = 1.0f / TanHalfFovY;
 
@@ -1804,57 +1802,78 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
             continue;
         }
 
+        uint32 RequestSize;
+        CalculateShadowMapLOD(LightData.PointLights[i].PositionRadius, CameraLocation, ViewportHeight, CotanHalfFOV, RequestSize);
+
         FVector LightPosition = { LightData.PointLights[i].PositionRadius.X, LightData.PointLights[i].PositionRadius.Y, LightData.PointLights[i].PositionRadius.Z };
-        float LightDistance = (LightPosition - CameraLocation).Length();
-        float Radius = LightData.PointLights[i].PositionRadius.W;
-
-        float Ratio = (Radius * ViewportHeight) / LightDistance * CotanHalfFOV;
-        uint32 RequestSize = 0;
-
-        if(Ratio > SHADOW_LOD_PIXEL_1)
-        {
-            RequestSize = SHADOW_LOD_LEVEL_1 >> ShadowQualityShift;
-        }
-        else if(Ratio > SHADOW_LOD_PIXEL_2)
-        {
-            RequestSize = SHADOW_LOD_LEVEL_2 >> ShadowQualityShift;
-        }
-        else if(Ratio > SHADOW_LOD_PIXEL_3)
-        {
-            RequestSize = SHADOW_LOD_LEVEL_3 >> ShadowQualityShift;
-        }
-        else if(Ratio > SHADOW_LOD_PIXEL_4)
-        {
-            RequestSize = SHADOW_LOD_LEVEL_4 >> ShadowQualityShift;
-        }
 
         const float Far = LightData.PointLights[i].PositionRadius.W;
         const float Near = 0.1f;
 
+        FShadowAtlasTile ShadowAtlasTile;
+        
+        bool bHasChangedRequestSize = false;
+
         for(uint32 face = 0; face < 6; face++)
         {
-            FShadowAtlasTile ShadowAtlasTile;
-
-            if(ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile))
+            while(true)
             {
-                uint32 InnerX = ShadowAtlasTile.X;
-                uint32 InnerY = ShadowAtlasTile.Y;
-                uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;
+                bool bHasAllocated = ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile);
 
-                ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
+                if(bHasAllocated)
+                {
+                    uint32 InnerX = ShadowAtlasTile.X;
+                    uint32 InnerY = ShadowAtlasTile.Y;
+                    uint32 InnerSize = ShadowAtlasTile.Size;
 
-                FMatrix FaceVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, InnerSize, face);
-                LightData.PointLights[i].ViewProjection[face] = FaceVP;
-                LightData.PointLights[i].AtlasScaleOffset[face] = { (float)InnerSize / AtlasSize, (float)InnerSize / AtlasSize, (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; //UV
-                LightData.PointLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
+                    ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
 
-                TArray<FPrimitiveSceneProxy*> ShadowCasters;
-                GatherShadowCasters(Scene, FaceVP, FrustumAllPlanesMask, ShadowCasters);
-                DrawShadowCasters(Scene, FaceVP, ViewMode, &ShadowCasters);
+                    FMatrix FaceVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, InnerSize, face);
+                    LightData.PointLights[i].ViewProjection[face] = FaceVP;
+                    LightData.PointLights[i].AtlasScaleOffset[face] = { (float)InnerSize / AtlasSize, (float)InnerSize / AtlasSize, (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; //UV
+                    LightData.PointLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
+
+                    TArray<FPrimitiveSceneProxy*> ShadowCasters;
+                    GatherShadowCasters(Scene, FaceVP, FrustumAllPlanesMask, ShadowCasters);
+                    DrawShadowCasters(Scene, FaceVP, ViewMode, &ShadowCasters);
+
+                    break;
+                }
+                else
+                {
+                    bHasChangedRequestSize = true;
+                    break;
+                }
             }
-            else
+
+            //if(ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile))
+            //{
+            //    uint32 InnerX = ShadowAtlasTile.X;
+            //    uint32 InnerY = ShadowAtlasTile.Y;
+            //    uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;
+
+            //    ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
+
+            //    FMatrix FaceVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, InnerSize, face);
+            //    LightData.PointLights[i].ViewProjection[face] = FaceVP;
+            //    LightData.PointLights[i].AtlasScaleOffset[face] = { (float)InnerSize / AtlasSize, (float)InnerSize / AtlasSize, (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; //UV
+            //    LightData.PointLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
+
+            //    TArray<FPrimitiveSceneProxy*> ShadowCasters;
+            //    GatherShadowCasters(Scene, FaceVP, FrustumAllPlanesMask, ShadowCasters);
+            //    DrawShadowCasters(Scene, FaceVP, ViewMode, &ShadowCasters);
+            //}
+            //else
+            //{
+            //    LightData.PointLights[i].AtlasScaleOffset[face] = { 0.0f,0.0f,0.0f,0.0f };
+            //}
+        }
+
+        if(bHasChangedRequestSize)
+        {
+            for(uint32 face = 0; face < 6; face++)
             {
-                LightData.PointLights[i].AtlasScaleOffset[face] = { 0.0f,0.0f,0.0f,0.0f };
+                LightData.PointLights[i].AtlasScaleOffset[face] = { 0.0f,0.0f,0.0f,0.0f };                
             }
         }
     }
@@ -1868,67 +1887,114 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
             continue;
         }
 
-        FVector LightPosition = { LightData.SpotLights[i].PositionRadius.X, LightData.SpotLights[i].PositionRadius.Y, LightData.SpotLights[i].PositionRadius.Z };
-        float LightDistance = (LightPosition - CameraLocation).Length();
-        float Radius = LightData.PointLights[i].PositionRadius.W;
+        uint32 RequestSize;
 
-        float Ratio = (Radius * ViewportHeight) / LightDistance * CotanHalfFOV;
-        uint32 RequestSize = 0;
-
-        if(Ratio > SHADOW_LOD_PIXEL_1)
-        {
-            RequestSize = SHADOW_LOD_LEVEL_1 >> ShadowQualityShift;
-        }
-        else if(Ratio > SHADOW_LOD_PIXEL_2)
-        {
-            RequestSize = SHADOW_LOD_LEVEL_2 >> ShadowQualityShift;
-        }
-        else if(Ratio > SHADOW_LOD_PIXEL_3)
-        {
-            RequestSize = SHADOW_LOD_LEVEL_3 >> ShadowQualityShift;
-        }
-        else if(Ratio > SHADOW_LOD_PIXEL_4)
-        {
-            RequestSize = SHADOW_LOD_LEVEL_4 >> ShadowQualityShift;
-        }
+        CalculateShadowMapLOD(LightData.SpotLights[i].PositionRadius, CameraLocation, ViewportHeight, CotanHalfFOV, RequestSize);
 
         const float Far = LightData.SpotLights[i].PositionRadius.W;
         const float Near = 0.1f;
 
         FShadowAtlasTile ShadowAtlasTile;
 
-        if(ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile))
+        while(true)
         {
-            uint32 InnerX = ShadowAtlasTile.X + SHADOW_ATLAS_BORDER;
-            uint32 InnerY = ShadowAtlasTile.Y + SHADOW_ATLAS_BORDER;
-            uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;
+            bool bHasAllocated = ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile);
 
-            ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
+            if(bHasAllocated)
+            {
+                uint32 InnerX = ShadowAtlasTile.X + SHADOW_ATLAS_BORDER;
+                uint32 InnerY = ShadowAtlasTile.Y + SHADOW_ATLAS_BORDER;
+                uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;
 
-            LightData.SpotLights[i].AtlasScaleOffset = { (float)InnerSize / AtlasSize , (float)InnerSize / AtlasSize , (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; // UV
-            LightData.SpotLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
+                ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
 
-            const FMatrix& LightVP = LightData.SpotLights[i].ViewProjection;
+                LightData.SpotLights[i].AtlasScaleOffset = { (float)InnerSize / AtlasSize , (float)InnerSize / AtlasSize , (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; // UV
+                LightData.SpotLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
-            TArray<FPrimitiveSceneProxy*> ShadowCasters;
-            GatherShadowCasters(Scene, LightVP, FrustumAllPlanesMask, ShadowCasters);
-            DrawShadowCasters(Scene, LightVP, ViewMode, &ShadowCasters);
+                const FMatrix& LightVP = LightData.SpotLights[i].ViewProjection;
+
+                TArray<FPrimitiveSceneProxy*> ShadowCasters;
+                GatherShadowCasters(Scene, LightVP, FrustumAllPlanesMask, ShadowCasters);
+                DrawShadowCasters(Scene, LightVP, ViewMode, &ShadowCasters);
+
+                break;
+            }
+            else
+            {
+                if(RequestSize / 2 >= ShadowRenderer->GetShadowAtlasAllocator().GetMinTileSize())
+                {
+                    RequestSize /= 2;
+                    continue;
+                }
+                else
+                {
+                    LightData.SpotLights[i].AtlasScaleOffset = { 0.0f,0.0f,0.0f,0.0f };                    
+                    break;
+                }
+            }
         }
-        else
-        {
-            LightData.SpotLights[i].AtlasScaleOffset = { 0.0f,0.0f,0.0f,0.0f };
-        }
+
+        //if(ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile))
+        //{
+        //    uint32 InnerX = ShadowAtlasTile.X + SHADOW_ATLAS_BORDER;
+        //    uint32 InnerY = ShadowAtlasTile.Y + SHADOW_ATLAS_BORDER;
+        //    uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;
+
+        //    ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
+
+        //    LightData.SpotLights[i].AtlasScaleOffset = { (float)InnerSize / AtlasSize , (float)InnerSize / AtlasSize , (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; // UV
+        //    LightData.SpotLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
+
+        //    const FMatrix& LightVP = LightData.SpotLights[i].ViewProjection;
+
+        //    TArray<FPrimitiveSceneProxy*> ShadowCasters;
+        //    GatherShadowCasters(Scene, LightVP, FrustumAllPlanesMask, ShadowCasters);
+        //    DrawShadowCasters(Scene, LightVP, ViewMode, &ShadowCasters);
+        //}
+        //else
+        //{
+        //    LightData.SpotLights[i].AtlasScaleOffset = { 0.0f,0.0f,0.0f,0.0f };
+        //    LightData.SpotLights[i].ShadowParameters.W = 0.0f;
+        //}
     }
 
     ShadowRenderer->EndShadowPass();    
 
     // Upload Light data to buffer
-    UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight)* LightData.SpotLightCount);
-    UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight)* LightData.PointLightCount);
+    ::UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight)* LightData.SpotLightCount);
+    ::UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight)* LightData.PointLightCount);
 
     // Shadow Pass에서 변경한 ViewCB를 메인 카메라 기준으로 복원
     FViewConstants CameraViewConstants{};
     CameraViewConstants.VP = CameraViewProjection;
     CameraViewConstants.CameraPosition = CameraLocation;
     RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
+}
+
+void FRenderer::CalculateShadowMapLOD(const FVector4 InPositionRadius, const FVector& CameraLocation, const float InViewportHeight, const float CotanHalfFOV, uint32& OutRequestSize)
+{
+    uint32 ShadowQualityShift = static_cast<uint32>(ShadowResolutionQuality);
+
+    FVector LightPosition = { InPositionRadius.X, InPositionRadius.Y, InPositionRadius.Z };
+    float LightDistance = (LightPosition - CameraLocation).Length();
+    float Radius = InPositionRadius.W;
+
+    float Ratio = (Radius * InViewportHeight) / LightDistance * CotanHalfFOV;
+
+    if(Ratio > SHADOW_LOD_PIXEL_1)
+    {
+        OutRequestSize = SHADOW_LOD_LEVEL_1 >> ShadowQualityShift;
+    }
+    else if(Ratio > SHADOW_LOD_PIXEL_2)
+    {
+        OutRequestSize = SHADOW_LOD_LEVEL_2 >> ShadowQualityShift;
+    }
+    else if(Ratio > SHADOW_LOD_PIXEL_3)
+    {
+        OutRequestSize = SHADOW_LOD_LEVEL_3 >> ShadowQualityShift;
+    }
+    else if(Ratio > SHADOW_LOD_PIXEL_4)
+    {
+        OutRequestSize = SHADOW_LOD_LEVEL_4 >> ShadowQualityShift;
+    }
 }
