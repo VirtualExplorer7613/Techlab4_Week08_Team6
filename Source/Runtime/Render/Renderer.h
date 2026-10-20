@@ -420,6 +420,9 @@ private:
 
     TUniquePtr<FShadowRenderer> ShadowRenderer;
 
+    // LightVP와 선택한 Frustum 평면을 기준으로 Shadow Caster 후보를 수집한다.
+    void GatherShadowCasters(const FScene& Scene, const FMatrix& LightVP, uint32 PlaneMask, TArray<FPrimitiveSceneProxy*>& OutCasters) const;
+
     // 카메라 RenderQueue와 독립적으로 Scene의 Shadow Caster를 렌더링한다.
     // Caster 목록이 전달되면 해당 목록을, 없으면 Scene.Proxies를 순회한다.
     void DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters = nullptr);

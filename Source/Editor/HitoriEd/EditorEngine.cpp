@@ -1374,7 +1374,12 @@ void UEditorEngine::DrawCascadeShadowPreviewContent()
         return;
     }
 
-    ImGui::Text("%u cascades, preview %u x %u", Count, FRenderer::CascadePreviewResolution, FRenderer::CascadePreviewResolution);
+	char Text[128];
+	std::snprintf(Text, sizeof(Text), "%u cascades, preview %u x %u", Count, FRenderer::CascadePreviewResolution, FRenderer::CascadePreviewResolution);
+
+	const float TextWidth = ImGui::CalcTextSize(Text).x;
+	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - TextWidth));
+	ImGui::TextDisabled("%s", Text);
 
     if (!ImGui::BeginTable("CascadeImages", 2))
         return;

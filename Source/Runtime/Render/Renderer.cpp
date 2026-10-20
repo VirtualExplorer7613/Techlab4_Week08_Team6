@@ -496,22 +496,7 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,
 
             TArray<FPrimitiveSceneProxy *> &ShadowCasters = CascadeShadowCasters[Index];
 
-            Scene.BVH.Query(
-                [&CullingLightVP](const FBox &WorldBounds) {
-                    const FBox ProjectedBounds = WorldBounds.GetWorldAABB(CullingLightVP);
-
-                    // 깊이는 이후 caster를 기준으로 확장하므로 여기서는 검사하지 않는다.
-                    return ProjectedBounds.Min.X <= 1.0f && ProjectedBounds.Max.X >= -1.0f &&
-                           ProjectedBounds.Min.Y <= 1.0f && ProjectedBounds.Max.Y >= -1.0f;
-                },
-                [&ShadowCasters](FPrimitiveSceneProxy *Proxy) {
-                    if (!Proxy || !Proxy->IsVisible() || !Proxy->GetCastShadows() || !Proxy->GetMesh() || !Proxy->GetRenderState() || Proxy->GetLODCount() == 0)
-                    {
-                        return;
-                    }
-
-                    ShadowCasters.Add(Proxy);
-                });
+            GatherShadowCasters(Scene, CullingLightVP, FrustumSidePlanesMask, ShadowCasters);
 
             const FMatrix LightView = ShadowRenderer->BuildDirectionalLightView(SplitCorners, LightDirection);
 
@@ -1249,6 +1234,35 @@ void FRenderer::SetShadowsEnabled(bool bEnabled)
     UploadLightGlobalConstants(LightData.DirectionalLight.ViewProjection);
 }
 
+void FRenderer::GatherShadowCasters(const FScene& Scene, const FMatrix& LightVP, uint32 PlaneMask, TArray<FPrimitiveSceneProxy*>& OutCasters) const
+{
+    OutCasters.Reset();
+
+    const FFrustumPlanes Frustum = ExtractFrustumPlanes(LightVP);
+
+    Scene.BVH.QueryCull(
+        PlaneMask,
+        [&Frustum](const FBox& Bounds, uint32& Mask)
+        {
+            const EFrustumTest Result = ClassifyBoxInFrustum(Bounds, Frustum, Mask);
+
+            if (Result == EFrustumTest::Outside)
+                return EBVHCullResult::Outside;
+
+            if (Result == EFrustumTest::Inside)
+                return EBVHCullResult::Inside;
+
+            return EBVHCullResult::Intersect;
+        },
+        [&OutCasters](FPrimitiveSceneProxy* Proxy)
+        {
+            if (!Proxy || !Proxy->IsVisible() || !Proxy->GetCastShadows() || !Proxy->GetMesh() || !Proxy->GetRenderState() || Proxy->GetLODCount() == 0)
+                return;
+
+            OutCasters.Add(Proxy);
+        });
+}
+
 void FRenderer::DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters)
 {
     FViewConstants ViewConstants{};
@@ -1364,18 +1378,7 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
 
         LightVP = ShadowRenderer->BuildDirectionalLightVP(CameraViewProjection, CameraNear, CameraFar, ShadowDistance, LightDirection, ShadowMap->GetWidth());
 
-
-        Scene.BVH.Query(
-            [&LightVP](const FBox &WorldBounds) {
-                const FBox ProjectedBounds = WorldBounds.GetWorldAABB(LightVP);
-
-                return ProjectedBounds.Min.X <= 1.0f && ProjectedBounds.Max.X >= -1.0f && ProjectedBounds.Min.Y <= 1.0f &&
-                       ProjectedBounds.Max.Y >= -1.0f;
-            },
-            [&ShadowCasters](FPrimitiveSceneProxy *Proxy) {
-                if (Proxy && Proxy->IsVisible() && Proxy->GetCastShadows() && Proxy->GetMesh() && Proxy->GetRenderState())
-                    ShadowCasters.Add(Proxy);
-            });
+        GatherShadowCasters(Scene, LightVP, FrustumSidePlanesMask, ShadowCasters);
 
         // 그림자를 받을 영역의 Light Space 깊이 범위를 구한다.
         const auto FrustumCorners = GetFrustumCornersWorld(CameraViewProjection);
@@ -1555,7 +1558,9 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
                 LightData.PointLights[i].AtlasScaleOffset[face] = { (float)InnerSize / AtlasSize, (float)InnerSize / AtlasSize, (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; //UV
                 LightData.PointLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
-                DrawShadowCasters(Scene, FaceVP, ViewMode, nullptr);
+                TArray<FPrimitiveSceneProxy*> ShadowCasters;
+                GatherShadowCasters(Scene, FaceVP, FrustumAllPlanesMask, ShadowCasters);
+                DrawShadowCasters(Scene, FaceVP, ViewMode, &ShadowCasters);
             }
             else
             {
@@ -1608,7 +1613,11 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
             LightData.SpotLights[i].AtlasScaleOffset = {(float) InnerSize / AtlasSize , (float)InnerSize / AtlasSize , (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; // UV
             LightData.SpotLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
-            DrawShadowCasters(Scene, LightData.SpotLights[i].ViewProjection, ViewMode, nullptr);
+            const FMatrix& LightVP = LightData.SpotLights[i].ViewProjection;
+
+            TArray<FPrimitiveSceneProxy*> ShadowCasters;
+            GatherShadowCasters(Scene, LightVP, FrustumAllPlanesMask, ShadowCasters);
+            DrawShadowCasters(Scene, LightVP, ViewMode, &ShadowCasters);
         }
         else
         {
