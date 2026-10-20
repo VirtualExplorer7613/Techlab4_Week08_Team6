@@ -368,6 +368,8 @@ public:
     const FSpotLight GetSpotLightData(uint32 SpotIndex) const { return LightData.SpotLights[SpotIndex]; }
     const FPointLight GetPointLightData(uint32 SpotIndex) const { return LightData.PointLights[SpotIndex]; }
 
+    void SetShadowResolutionQuality(EShadowResolutionQuality InShadowResolutionQuality) { ShadowResolutionQuality = InShadowResolutionQuality; }
+
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
 	FRenderQueue RenderPackets;
@@ -465,4 +467,7 @@ private:
     FCSMSettings CSMSettings;
     FCSMSettings PendingCSMSettings;
     bool bHasPendingCSMSettings = false;
+
+    // Shadow resolution quallity
+    EShadowResolutionQuality ShadowResolutionQuality = EShadowResolutionQuality::High;
 };

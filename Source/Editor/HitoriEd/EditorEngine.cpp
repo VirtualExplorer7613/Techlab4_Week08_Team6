@@ -1069,6 +1069,7 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
     if (bRenderShadows)
     {
         Renderer->SetShadowQuality(Settings.ShadowQuality);
+		Renderer->SetShadowResolutionQuality(static_cast<EShadowResolutionQuality>(Settings.ShadowResolutionQuality));
         Renderer->SetTransitionFactor(Settings.TransitionFactor);
 
         {

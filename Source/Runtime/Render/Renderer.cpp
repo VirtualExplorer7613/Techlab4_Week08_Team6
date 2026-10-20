@@ -1510,6 +1510,8 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
 
     float AtlasSize = ShadowMap->GetWidth();
 
+    uint32 ShadowQualityShift = static_cast<uint32>(ShadowResolutionQuality);
+
     // PointLight Loop
     uint32 PointLightCount = LightData.PointLightCount;
     for (uint32 i = 0; i < PointLightCount; i++)
@@ -1527,15 +1529,15 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
 
         if( Ratio > 0.5f )
         {
-            RequestSize = SHADOW_LOD_LEVEL_1;
+            RequestSize = SHADOW_LOD_LEVEL_1 >> ShadowQualityShift;
         }
         else if( Ratio > 0.25f )
         {
-            RequestSize = SHADOW_LOD_LEVEL_2;
+            RequestSize = SHADOW_LOD_LEVEL_2 >> ShadowQualityShift;
         }
         else
         {
-            RequestSize = SHADOW_LOD_LEVEL_3;
+            RequestSize = SHADOW_LOD_LEVEL_3 >> ShadowQualityShift;
         }
 
         const float Far = LightData.PointLights[i].PositionRadius.W;
@@ -1586,15 +1588,15 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
 
         if( Ratio > 0.5f )
         {
-            RequestSize = SHADOW_LOD_LEVEL_1;
+            RequestSize = SHADOW_LOD_LEVEL_1 >> ShadowQualityShift;
         }
         else if( Ratio > 0.25f )
         {
-            RequestSize = SHADOW_LOD_LEVEL_2;
+            RequestSize = SHADOW_LOD_LEVEL_2 >> ShadowQualityShift;
         }
         else
         {
-            RequestSize = SHADOW_LOD_LEVEL_3;
+            RequestSize = SHADOW_LOD_LEVEL_3 >> ShadowQualityShift;
         }
 
         const float Far = LightData.SpotLights[i].PositionRadius.W;

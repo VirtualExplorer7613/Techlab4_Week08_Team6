@@ -12,11 +12,19 @@
 #include "Render/Texture2D.h"
 #include "Render/TextureCube.h"
 
-#define SHADOW_ATLAS_MAP_SIZE 1 << 14
-#define SHADOW_LOD_LEVEL_1 1024
-#define SHADOW_LOD_LEVEL_2 512
-#define SHADOW_LOD_LEVEL_3 256
+#define SHADOW_ATLAS_MAP_SIZE 1 << 13
+#define SHADOW_LOD_LEVEL_1 1 << 10
+#define SHADOW_LOD_LEVEL_2 1 << 9
+#define SHADOW_LOD_LEVEL_3 1 << 8
+#define SHADOW_LOD_LEVEL_4 1 << 7
 #define SHADOW_ATLAS_BORDER 5
+
+enum class EShadowResolutionQuality
+{
+    High = 0,
+    Medium = 1,
+    Low = 2
+};
 
 struct FShadowPassDesc
 {
