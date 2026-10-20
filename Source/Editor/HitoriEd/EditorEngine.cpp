@@ -1019,6 +1019,8 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 
     const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
 
+    Renderer->SetShadowsEnabled(bRenderShadows);
+
     if (bRenderShadows)
     {
 		Renderer->SetShadowQuality(Settings.ShadowQuality);
@@ -1046,8 +1048,6 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	{
 		bTileCulled = ComputeTileBasedLight(ViewIndex, ViewRenderingInfo, ViewProjection);
 	}
-
-    Renderer->SetShadowsEnabled(bRenderShadows);
 
 	// 1. 불투명 Pass
 	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, bPrepass, bTileCulled);
