@@ -206,7 +206,7 @@ public:
     bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc& Desc, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters = nullptr);
 
     // Directional Light의 그림자 맵을 렌더링하고 메인 카메라의 ViewCB를 복원한다.
-    void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, float CameraNear, float CameraFar, bool bOrthographic, const EViewMode ViewMode);
+    void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, float CameraNear, float CameraFar, bool bOrthographic, const EViewMode ViewMode, const FMatrix& CameraWorld, float TanHalfFovX, float TanHalfFovY);
 
     void RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
     void RenderPointShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
@@ -364,6 +364,7 @@ public:
     }
 
     void PrepareCascadeShadows(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const FVector &CameraForward, float CameraNear, float CameraFar,bool bOrthographic, EViewMode ViewMode);
+    void PrepareCascadeShadows(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const FVector& CameraForward, float CameraNear, float CameraFar, bool bOrthographic, EViewMode ViewMode, const FMatrix& CameraWorld, float TanHalfFovX, float TanHalfFovY);
 
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
@@ -450,7 +451,8 @@ private:
     uint32 CascadePreviewCount = 0;
     bool InitCascadePreviewResources();
     TUniquePtr<FConstantBuffer> CascadeDebugCB;
-    void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
+    //void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
+    void UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& CameraWorld, const FVector& CameraForward, float CameraNear, float CameraFar, bool bOrthographic, float TanHalfFovX, float TanHalfFovY);
     void RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, EViewMode ViewMode);
 
     // 렌더 패스를 시작하기 전에 요청을 적용한다.

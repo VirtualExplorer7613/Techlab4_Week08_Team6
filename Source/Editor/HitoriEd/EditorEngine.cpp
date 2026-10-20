@@ -1026,9 +1026,16 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
         Renderer->SetShadowQuality(Settings.ShadowQuality);
         Renderer->SetTransitionFactor(Settings.TransitionFactor);
 
+		const FMatrix CameraWorld = MultipleViewportsAdapter.GetEngineViewMatrix(ViewIndex).Inverse();
+		const FMatrix CameraProjection = MultipleViewportsAdapter.GetEngineProjectionMatrix(ViewIndex);
+
+		const float TanHalfFovX = 1.0f / CameraProjection.M[1][0];
+		const float TanHalfFovY = 1.0f / CameraProjection.M[2][1];
+
+
         {
             SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowDirectional);
-            Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+            Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
         }
 
         {
@@ -1038,7 +1045,8 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 
         {
             SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowCSM);
-            Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+
+            Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
         }
 
         if (ViewIndex == MultipleViewportsAdapter.GetEditorViewIndex())
