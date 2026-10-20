@@ -10,6 +10,7 @@
 #include "TileBasedCulling/TileBasedCulling.h"
 #include "Shared/LightDefinitions.h"
 #include "Shadow/ShadowRenderer.h"
+#include "Shadow/CascadeShadowMaps.h"
 
 constexpr uint32 ObjectSlotBytes = 256;
 
@@ -113,6 +114,29 @@ struct alignas(16) FLightGlobalConstants
 	uint32 Padding[2] = {};
 };
 static_assert(sizeof(FLightGlobalConstants) == 144, "FLightGlobalConstants must match UberLit LightConstants");
+
+struct alignas(16) FCascadeDebugConstants
+{
+    FMatrix LightVP[4];
+
+    FVector4 CameraForward = FVector4(1, 0, 0, 0);
+
+    // 임시 경계값, 월드 단위. W는 사용하지 않는다.
+    FVector4 SplitDepths = FVector4(5, 15, 30, 0);
+    FVector4 BlendEndDepths;
+
+    // 16바이트
+    float ShadowDistance = 0.0f;
+    float InvResolution = 0.0f;
+    uint32 CascadeCount = 0;
+    uint32 CSMEnabled = 0;
+    // 16바이트
+    uint32 DebugColorsEnabled = 0;
+    uint32 BlendEnabled = 0;
+    uint32 Padding[2] = {};
+};
+
+static_assert(sizeof(FCascadeDebugConstants) == 336, "FCascadeDebugConstants Size Error");
 
 class FRenderer
 {
@@ -235,6 +259,47 @@ public:
         return DirectionalShadowMap ? DirectionalShadowMap->GetSRV() : nullptr;
     }
 
+    const FCascadeShadowMaps &GetCascadeShadowMaps() const
+    {
+        return CascadeShadowMaps;
+    }
+
+    void RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, EViewMode ViewMode);
+
+    bool GetCascadeDebugColors() const
+    {
+        return bCascadeDebugColors;
+    }
+
+    void SetCascadeDebugColors(bool bEnabled)
+    {
+        bCascadeDebugColors = bEnabled;
+    }
+
+    void UpdateCascadeDebugConstants(const FVector &CameraForward);
+
+    void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
+
+    void SetCSMEnabled(bool bEnabled)
+    {
+        bCSMEnabled = bEnabled;
+    }
+
+    bool GetCSMEnabled() const
+    {
+        return bCSMEnabled;
+    }
+
+    bool GetCascadeBlendEnabled() const
+    {
+        return bCascadeBlendEnabled;
+    }
+
+    void SetCascadeBlendEnabled(bool bEnabled)
+    {
+        bCascadeBlendEnabled = bEnabled;
+    }
+
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
 	FRenderQueue RenderPackets;
@@ -299,4 +364,13 @@ private:
 
     // Shadow map pass에서만 사용
     bool bShadowMapPass = false;
+
+    FCascadeDebugConstants CascadeConstants{};
+    bool bCSMEnabled = true;
+    float CSMShadowDistance = 40.0f;
+
+    FCascadeShadowMaps CascadeShadowMaps;
+    bool bCascadeDebugColors = false;
+    bool bCascadeBlendEnabled = false;
+    TUniquePtr<FConstantBuffer> CascadeDebugCB;
 };

@@ -29,6 +29,8 @@
 #include "Editor/HitoriEd/EditorFileUtils.h"
 #include "UObject/UObjectIterator.h"
 #include "Component/BillboardComponent.h"
+#include "Render/Shadow/CascadeShadowMaps.h"
+#include "Component/DirectionalLightComponent.h"
 
 #include "Core/EngineLog.h"
 #include "Core/Stats/LightweightStats.h"
@@ -199,6 +201,62 @@ bool UEditorEngine::Init()
 			}
 		}
 	);
+
+    DetailsPanel->SetShadowPreviewCallback([this](ULightComponent *Light) {
+        if (!Light)
+            return;
+
+        ImGui::PushID(Light);
+
+        const bool bDirectional = Cast<UDirectionalLightComponent>(Light) != nullptr;
+
+        // 기존 Shadow Map 이미지 위.
+        if (bDirectional)
+        {
+            bool bCSMEnabled = Renderer->GetCSMEnabled();
+
+            if (ImGui::Checkbox("Cascade Shadow Map", &bCSMEnabled))
+            {
+                Renderer->SetCSMEnabled(bCSMEnabled);
+            }
+
+            bool bDebugColors = Renderer->GetCascadeDebugColors();
+
+            ImGui::BeginDisabled(!bCSMEnabled);
+
+            bool bBlendEnabled = Renderer->GetCascadeBlendEnabled();
+
+            if (ImGui::Checkbox("Cascade Shadow Blending", &bBlendEnabled))
+            {
+                Renderer->SetCascadeBlendEnabled(bBlendEnabled);
+            }
+
+            if (ImGui::Checkbox("Cascade Shadow Colors", &bDebugColors))
+            {
+                Renderer->SetCascadeDebugColors(bDebugColors);
+            }
+            ImGui::EndDisabled();
+        }
+
+        // 기존 단일 Shadow Map 이미지.
+        FTexture2D *Texture = Light->GetShadowMapTexture();
+
+        if (Texture && Texture->GetSRV())
+        {
+            ImGui::Image(reinterpret_cast<ImTextureID>(Texture->GetSRV()), ImVec2(256.0f, 256.0f));
+        }
+
+        // 기존 이미지 아래.
+        if (bDirectional)
+        {
+            ImGui::SeparatorText("Cascade Shadow Maps");
+
+            DrawCascadeShadowPreviewContent(Renderer->GetCascadeShadowMaps());
+        }
+
+        ImGui::PopID();
+    });
+
 
 	OutlinerPanel->SetDeleteActorCallback(
 		[this](AActor* Actor)
@@ -599,9 +657,9 @@ void UEditorEngine::RenderOpaquePass(const int32 ViewIndex, const FRenderingInfo
 
 	RenderCommand::BeginRenderPass(PassInfo);
 
-	const bool bDrawPrimitives = SettingsPanel->GetSettings().bDrawPrimitives;
-	// 삼각형 연결은 유지하고 View별 Fill Mode만 선택한다.
+	const bool bDrawPrimitives = MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Primitives);
 
+	// 삼각형 연결은 유지하고 View별 Fill Mode만 선택한다.
 	EViewMode ViewMode = MultipleViewportsAdapter.GetViewMode(ViewIndex);
 	const ERasterizerState SceneRasterizerState = ViewMode == EViewMode::Wireframe
 		? ERasterizerState::Wireframe : ERasterizerState::SolidBack;
@@ -685,13 +743,13 @@ void UEditorEngine::RenderOverlayPass(const int32 ViewIndex, UWorld& ViewWorld, 
 
 	RenderCommand::BeginRenderPass(PassInfo);
 
-	if (bShowEditorOverlay && SettingsPanel->GetSettings().bDrawBatchLine && !SettingsPanel->GetSettings().bDepthView)
+	if (bShowEditorOverlay && MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::BatchLine) && !SettingsPanel->GetSettings().bDepthView)
 	{
 		// 라인 배처는 매 프레임 한 번만 비우고 한 번만 그린다.
 		// 바운딩박스는 그 안에 쌓이는 여러 항목 중 하나일 뿐이다.
 		LineBatcher->BeginFrame();
 
-		if (SettingsPanel->GetSettings().bDrawBoundingBox)
+		if (MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::BoundingBox))
 		{
 			LineBatcher->BuildVertexBuffer(ViewWorld);
 			ViewWorld.GetPathTracker().OnRender(LineBatcher.get());
@@ -722,11 +780,11 @@ void UEditorEngine::RenderOverlayPass(const int32 ViewIndex, UWorld& ViewWorld, 
 
 	//그리드
 	//TODO : 그리드도 안개가 적용되어야하나..?
-	if (bShowEditorOverlay && SettingsPanel->GetSettings().bDrawBatchLine)
+	if (bShowEditorOverlay && MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::BatchLine))
 	{
 		const EGridPlane GridPlane = MultipleViewportsAdapter.GetGridPlane(ViewIndex);
 
-		if (SettingsPanel->GetSettings().bDrawPSGrid && !MultipleViewportsAdapter.IsOrthographic(ViewIndex))
+		if (MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::PSGrid) && !MultipleViewportsAdapter.IsOrthographic(ViewIndex))
 		{
 			GridRenderer->OnRenderPSGrid(
 				ViewProjection, ViewCameraLocation, SettingsPanel->GetSettings(), PassInfo.ViewportSetting
@@ -811,7 +869,7 @@ void UEditorEngine::RenderOverlayPass(const int32 ViewIndex, UWorld& ViewWorld, 
 
 	RenderCommand::ClearDepthStencil(PassInfo.DepthStencil.Texture);
 
-	if (SettingsPanel->GetSettings().bShowUUID)
+	if (MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::UUID))
 	{
 		for (AActor* Actor : ViewWorld.GetPersistentLevel()->GetActors())
 		{
@@ -940,11 +998,11 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	const EViewMode ViewMode = MultipleViewportsAdapter.GetViewMode(ViewIndex);
 	// Light Culling 뷰 모드는 컬링 결과를 보여주는 모드라 설정과 상관없이 컬링을 돌린다.
 	const bool bLightCullingView = ViewMode == EViewMode::LightCulling;
-	const bool bPrepass = Settings.bDrawPrimitives && (Settings.bTileBasedLightCulling || bLightCullingView) && ViewMode != EViewMode::Wireframe; //depth prepass를 할 것인가
+	const bool bPrepass = MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Primitives) && (Settings.bTileBasedLightCulling || bLightCullingView) && ViewMode != EViewMode::Wireframe; //depth prepass를 할 것인가
 	const bool bTileCull = bPrepass && (IsPerPixelLit(ViewMode) || bLightCullingView); //라이트 컬링을 할 것인가
 
 	//0. 정렬
-	if (Settings.bDrawPrimitives)
+	if (MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Primitives))
 		Renderer->RenderQueueSorting(RenderQueue, ViewProjection, ViewCameraLocation);
 
     const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
@@ -952,6 +1010,9 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
     Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
     Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
     Renderer->RenderPointShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+
+    Renderer->UpdateCascadeDebugConstants(ViewWorld.GetScene(), ViewProjection, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex));
+    Renderer->RenderCascadeShadowPreview(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
 
 	if (bPrepass)
 	{
@@ -976,7 +1037,7 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	else
 	{
 		//직교인 경우 안개 Pass를 그리지 않는다.
-		if (!MultipleViewportsAdapter.IsOrthographic(ViewIndex) && SettingsPanel->GetSettings().bExponentialHeightFog)
+		if (!MultipleViewportsAdapter.IsOrthographic(ViewIndex) && MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::ExponentialHeightFog))
 			// 2. 안개 Pass
 			RenderFogPass(ViewIndex, ViewWorld, ViewRenderingInfo, ViewCameraLocation, ViewProjection, RenderQueue);
 
@@ -1273,4 +1334,65 @@ void UEditorEngine::SaveSceneAs()
 		return;
 	}
 	FEditorFileUtils::SaveSceneAs(EditorWorld);
+}
+
+void UEditorEngine::DrawCascadeShadowPreviewContent(const FCascadeShadowMaps &Maps)
+{
+    const FString ShaderPath = "Resources/Shader/CascadeDepthPreview.hlsl";
+
+    FShaderProgram *Program = FRenderResourceManager::GetShaderProgram(ShaderPath);
+
+    if (!Program || Program->SourcePath != ShaderPath || !Program->PixelShader || !Program->PixelShader->IsValid())
+    {
+        ImGui::TextUnformatted("CascadeDepthPreview shader is unavailable.");
+        return;
+    }
+
+    ID3D11PixelShader *PixelShader = Program->PixelShader->GetShader();
+
+    ImGui::Text("%u cascades, %u x %u", Maps.GetCascadeCount(), Maps.GetResolution(), Maps.GetResolution());
+
+    if (ImGui::BeginTable("CascadeImages", 2))
+    {
+        for (uint32 Index = 0; Index < Maps.GetCascadeCount(); ++Index)
+        {
+            ImGui::TableNextColumn();
+            ImGui::Text("Cascade %u", Index);
+
+            ID3D11ShaderResourceView *SRV = Maps.GetSliceSRV(Index);
+
+            if (!SRV)
+            {
+                ImGui::TextUnformatted("No depth resource.");
+                continue;
+            }
+
+            const float Size = std::max(1.0f, std::min(200.0f, ImGui::GetContentRegionAvail().x));
+
+            ImDrawList *DrawList = ImGui::GetWindowDrawList();
+
+            DrawList->AddCallback(BindCascadePreviewPS, PixelShader);
+
+            ImGui::Image(reinterpret_cast<ImTextureID>(SRV), ImVec2(Size, Size));
+
+            DrawList->AddCallback(UnbindCascadePreviewSRV);
+            DrawList->AddCallback(ImGui::GetPlatformIO().DrawCallback_ResetRenderState);
+        }
+
+        ImGui::EndTable();
+    }
+}
+
+void UEditorEngine::BindCascadePreviewPS(const ImDrawList *DrawList, const ImDrawCmd *Command)
+{
+    auto *PixelShader = static_cast<ID3D11PixelShader *>(Command->UserCallbackData);
+
+    RenderCommand::GetContext()->PSSetShader(PixelShader, nullptr, 0);
+}
+
+void UEditorEngine::UnbindCascadePreviewSRV(const ImDrawList *DrawList, const ImDrawCmd *Command)
+{
+    ID3D11ShaderResourceView *NullSRV = nullptr;
+
+    RenderCommand::GetContext()->PSSetShaderResources(0, 1, &NullSRV);
 }

@@ -7,6 +7,7 @@
 #include "Math/Matrix.h"
 #include "Render/RenderPacket.h"
 #include "Render/ViewMode.h"
+#include "Render/ShowFlags.h"
 #include "Asset/LOD/StaticMeshLODSelector.h"
 
 #include "Containers/Map.h"
@@ -21,10 +22,42 @@ class UWorld;
 class FMultipleViewportsAdapter
 {
 public:
+
+    FMultipleViewportsAdapter()
+    {
+        for (EShowFlags &Flags : ShowFlags)
+            Flags = DefaultShowFlags;
+    }
+
+    EShowFlags GetShowFlags(int32 Index) const
+    {
+        if (Index < 0 || Index >= MaxViewCount)
+            return EShowFlags::None;
+
+        return ShowFlags[Index];
+    }
+
+    bool IsShowFlagEnabled(int32 Index, EShowFlags Flag) const
+    {
+        return HasFlag(GetShowFlags(Index), Flag);
+    }
+
+    void SetShowFlag(int32 Index, EShowFlags Flag, bool bEnabled)
+    {
+        if (Index < 0 || Index >= MaxViewCount)
+            return;
+
+        if (bEnabled)
+            ShowFlags[Index] |= Flag;
+        else
+            ShowFlags[Index] &= ~Flag;
+    }
+
     // 패널의 네 View(0~3) 밖에서 그리는 View(PIE 별도 창 등). 레이아웃·입력·피킹에는 참여하지 않고
     // 카메라 Override와 SetExternalViewSize로만 활성화되며 렌더·컬링 함수에서만 쓴다.
     static constexpr int32 ExternalViewIndex = 4;
     static constexpr int32 MaxViewCount = 5;
+    static constexpr EShowFlags DefaultShowFlags = EShowFlags::Primitives | EShowFlags::BatchLine | EShowFlags::ExponentialHeightFog | EShowFlags::Shadows;
     // 외부 View의 렌더 크기를 지정한다. 0이면 비활성이다.
     void SetExternalViewSize(uint32 Width, uint32 Height);
 
@@ -155,6 +188,7 @@ private:
     int32 EditorViewIndex = 0;
 
     EViewMode ViewModes[MaxViewCount]{};   // 0번 = Lit_Phong
+    EShowFlags ShowFlags[MaxViewCount]{};
 
     FViewCamera CameraOverrides[MaxViewCount]{};
     bool bHasCameraOverride[MaxViewCount]{};
