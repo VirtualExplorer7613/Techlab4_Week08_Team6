@@ -105,7 +105,7 @@ struct FPointLightInfo
     float4 PositionRadius;
     float4 ColorIntensity;
     float4 FalloffEnabled;
-    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shadow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
     float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
 };
 
@@ -117,7 +117,7 @@ struct FSpotLightInfo
     float4 OutAngleInvCosDiff;
     float4 FowardVector;
     matrix ViewProjection;
-    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shadow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
     float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
 };
 
@@ -131,7 +131,7 @@ struct FDirectionalLightInfo
     float4 ColorIntensity;
     float4 Direction;
     matrix LightVP;
-    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shadow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
     float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
 };
 
@@ -228,6 +228,17 @@ FLightResult BlinnPhong(float3 N, float3 L, float3 V, float3 Radiance)
 }
 
 
+void CalcCubeDiscBasis(float invMapSize, float3 lightToPixel, out float3 outNormalLightToPixel, out float3 outSideVector, out float3 outUpVector)
+{
+    outNormalLightToPixel = normalize(lightToPixel);
+    float3 axis = abs(outNormalLightToPixel.z) > 0.99 ? float3(1.0f, 0.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f); // 월드 Z축 (0,0,1)
+    outSideVector = normalize(cross(outNormalLightToPixel, axis));
+    outUpVector = cross(outSideVector, outNormalLightToPixel);
+
+    outSideVector = outSideVector * invMapSize;
+    outUpVector = outUpVector * invMapSize;
+}
+
 float SampleCubeShadow(float3 lightToPixel, float projDepth, float bias)
 {
     return PointShadowMap.SampleCmpLevelZero(g_SampleLinearComparison, lightToPixel, projDepth - bias);
@@ -235,18 +246,13 @@ float SampleCubeShadow(float3 lightToPixel, float projDepth, float bias)
 
 float CubeDiscPCF5(float3 lightToPixel, float projDepth, float bias, float invMapSize)
 {
-    float3 nomalLitghtToPixel = normalize(lightToPixel);
     float visibility = 0;
-    float3 axis = abs(nomalLitghtToPixel.z) > 0.99 ? float3(1.0f, 0.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f); // 월드 Z축 (0,0,1)
-    float3 sideVector = normalize(cross(nomalLitghtToPixel, axis));
-    float3 upVector = cross(sideVector, nomalLitghtToPixel);
+    float3 normalLightToPixel, sideVector, upVector;
+    CalcCubeDiscBasis(invMapSize, lightToPixel, normalLightToPixel, sideVector, upVector);
     
-    sideVector = sideVector * invMapSize;
-    upVector = upVector * invMapSize;
-
     for (int i = 0; i < 5; i++)
     {
-        float3 CurrentPos = nomalLitghtToPixel + (sideVector * DiscSamples5[i].x + upVector * DiscSamples5[i].y);
+        float3 CurrentPos = normalLightToPixel + (sideVector * DiscSamples5[i].x + upVector * DiscSamples5[i].y);
         visibility += SampleCubeShadow(CurrentPos, projDepth, bias);
     }
     
@@ -255,18 +261,14 @@ float CubeDiscPCF5(float3 lightToPixel, float projDepth, float bias, float invMa
 
 float CubeDiscPCF12(float3 lightToPixel, float projDepth, float bias, float invMapSize)
 {
-    float3 nomalLitghtToPixel = normalize(lightToPixel);
     float visibility = 0;
-    float3 axis = abs(nomalLitghtToPixel.z) > 0.99 ? float3(1.0f, 0.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f); // 월드 Z축 (0,0,1)
-    float3 sideVector = normalize(cross(nomalLitghtToPixel, axis));
-    float3 upVector = cross(sideVector, nomalLitghtToPixel);
 
-    sideVector = sideVector * invMapSize;
-    upVector = upVector * invMapSize;
+    float3 normalLightToPixel, sideVector, upVector;
+    CalcCubeDiscBasis(invMapSize, lightToPixel, normalLightToPixel, sideVector, upVector);
 
     for (int i = 0; i < 12; i++)
     {
-        float3 CurrentPos = nomalLitghtToPixel + (sideVector * DiscSamples12[i].x + upVector * DiscSamples12[i].y);
+        float3 CurrentPos = normalLightToPixel + (sideVector * DiscSamples12[i].x + upVector * DiscSamples12[i].y);
         visibility += SampleCubeShadow(CurrentPos, projDepth, bias);
     }
     
@@ -275,25 +277,21 @@ float CubeDiscPCF12(float3 lightToPixel, float projDepth, float bias, float invM
 
 float CubeDiscPCF29(float3 lightToPixel, float projDepth, float bias, float invMapSize)
 {
-    float3 nomalLitghtToPixel = normalize(lightToPixel);
     float visibility = 0;
-    float3 axis = abs(nomalLitghtToPixel.z) > 0.99 ? float3(1.0f, 0.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f); // 월드 Z축 (0,0,1)
-    float3 sideVector = normalize(cross(nomalLitghtToPixel, axis));
-    float3 upVector = cross(sideVector, nomalLitghtToPixel);
-
-    sideVector = sideVector * invMapSize;
-    upVector = upVector * invMapSize;
+    float3 normalLightToPixel, sideVector, upVector;
+    CalcCubeDiscBasis(invMapSize, lightToPixel, normalLightToPixel, sideVector, upVector);
+        
 
     for (int i = 0; i < 29; i++)
     {
-        float3 CurrentPos = nomalLitghtToPixel + (sideVector * DiscSamples29[i].x + upVector * DiscSamples29[i].y);
+        float3 CurrentPos = normalLightToPixel + (sideVector * DiscSamples29[i].x + upVector * DiscSamples29[i].y);
         visibility += SampleCubeShadow(CurrentPos, projDepth, bias);
     }
     
     return visibility / 29;
 }
 
-float ShadowFilteringCube(TextureCube<float> ShadowMap, float3 lightToPixel, float3 worldPos, float projDepth, float bias, float invMapSize)
+float ShadowFilteringCube(TextureCube<float> ShadowMap, float3 lightToPixel, float projDepth, float bias, float invMapSize)
 {
     float visibility = 0.0f;
     
@@ -466,7 +464,7 @@ float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint
 
     float bias = PointLights[0].ShadowParameters.x + PointLights[0].ShadowParameters.y * (1.0f - NdotL);
     
-    return ShadowFilteringCube(PointShadowMap, lightToPixel, worldPos, projDepth, bias, invMapSize);
+    return ShadowFilteringCube(PointShadowMap, lightToPixel, projDepth, bias, invMapSize);
 
 }
 
