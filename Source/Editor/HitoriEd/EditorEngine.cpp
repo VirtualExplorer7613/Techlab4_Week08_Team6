@@ -224,7 +224,7 @@ bool UEditorEngine::Init()
 
             DrawCSMSettingsContent();
 
-            if (ImGui::DragFloat("Distribution Exponent", &Exponent, 0.05f, 0.1f, 10.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+            if (ImGui::DragFloat("Distribution Exponent", &Exponent, 0.05f, 1.0f, 10.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
             {
                 Renderer->SetCSMDistributionExponent(Exponent);
             }

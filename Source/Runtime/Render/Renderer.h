@@ -317,7 +317,7 @@ public:
     void SetCSMDistributionExponent(float Value)
     {
         // UI 외부에서 변경해도 범위 보장
-        CSMDistributionExponent = Value < 0.1f ? 0.1f : (Value > 10.0f ? 10.0f : Value);
+        CSMDistributionExponent = Value < 1.0f ? 1.0f : (Value > 10.0f ? 10.0f : Value);
     }
 
     void SetCSMEnabled(bool bEnabled)
@@ -429,6 +429,8 @@ private:
     bool bShadowMapPass = false;
 
     FCascadeDebugConstants CascadeConstants{};
+    // 각 Cascade의 Shadow Pass에 사용할 CPU 측 목록.
+    TArray<FPrimitiveSceneProxy *> CascadeShadowCasters[4];
     bool bCSMEnabled = true;
     float CSMShadowDistance = 40.0f;
     float CSMDistributionExponent = 3.0f;
