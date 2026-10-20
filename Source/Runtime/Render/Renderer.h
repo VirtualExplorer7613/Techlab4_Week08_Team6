@@ -208,12 +208,13 @@ public:
     bool RenderShadowDepth(const FScene& Scene, const FShadowPassDesc& Desc, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters = nullptr);
 
     // Directional Light의 그림자 맵을 렌더링하고 메인 카메라의 ViewCB를 복원한다.
-    void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, float CameraNear, float CameraFar, bool bOrthographic, const EViewMode ViewMode);
+    void RenderDirectionalShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, float CameraNear, float CameraFar, bool bOrthographic, const EViewMode ViewMode, const FMatrix& CameraWorld, float TanHalfFovX, float TanHalfFovY);
 
     void RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
     void RenderPointShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
 
-    void RenderShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+    void RenderShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const float TanHalfFovY, const float ViewportHeight, const EViewMode ViewMode);
+    void CalculateShadowMapLOD(const FVector4 InPositionRadius, const FVector & CameraLocation, const float InViewportHeight, const float CotanHalfFOV, uint32& OutRequestSize);
 
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
 	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World)
@@ -366,6 +367,12 @@ public:
     }
 
     void PrepareCascadeShadows(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const FVector &CameraForward, float CameraNear, float CameraFar,bool bOrthographic, EViewMode ViewMode);
+    void PrepareCascadeShadows(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const FVector& CameraForward, float CameraNear, float CameraFar, bool bOrthographic, EViewMode ViewMode, const FMatrix& CameraWorld, float TanHalfFovX, float TanHalfFovY);
+
+    const FSpotLight GetSpotLightData(uint32 SpotIndex) const { return LightData.SpotLights[SpotIndex]; }
+    const FPointLight GetPointLightData(uint32 SpotIndex) const { return LightData.PointLights[SpotIndex]; }
+
+    void SetShadowResolutionQuality(EShadowResolutionQuality InShadowResolutionQuality) { ShadowResolutionQuality = InShadowResolutionQuality; }
 
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
@@ -423,6 +430,9 @@ private:
 
     TUniquePtr<FShadowRenderer> ShadowRenderer;
 
+    // LightVP와 선택한 Frustum 평면을 기준으로 Shadow Caster 후보를 수집한다.
+    void GatherShadowCasters(const FScene& Scene, const FMatrix& LightVP, uint32 PlaneMask, TArray<FPrimitiveSceneProxy*>& OutCasters) const;
+
     // 카메라 RenderQueue와 독립적으로 Scene의 Shadow Caster를 렌더링한다.
     // Caster 목록이 전달되면 해당 목록을, 없으면 Scene.Proxies를 순회한다.
     void DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters = nullptr);
@@ -453,7 +463,8 @@ private:
     uint32 CascadePreviewCount = 0;
     bool InitCascadePreviewResources();
     TUniquePtr<FConstantBuffer> CascadeDebugCB;
-    void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
+    //void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
+    void UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& CameraWorld, const FVector& CameraForward, float CameraNear, float CameraFar, bool bOrthographic, float TanHalfFovX, float TanHalfFovY);
     void RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, EViewMode ViewMode);
 
     // 렌더 패스를 시작하기 전에 요청을 적용한다.
@@ -462,4 +473,7 @@ private:
     FCSMSettings CSMSettings;
     FCSMSettings PendingCSMSettings;
     bool bHasPendingCSMSettings = false;
+
+    // Shadow resolution quallity
+    EShadowResolutionQuality ShadowResolutionQuality = EShadowResolutionQuality::High;
 };

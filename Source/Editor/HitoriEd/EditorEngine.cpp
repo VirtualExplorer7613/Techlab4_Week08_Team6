@@ -246,15 +246,60 @@ bool UEditorEngine::Init()
                 Renderer->SetCascadeDebugColors(bDebugColors);
             }
             ImGui::EndDisabled();
-        }
+        }		
 
         // 기존 단일 Shadow Map 이미지.
-        FTexture2D *Texture = Light->GetShadowMapTexture();
+		FTexture2D* Texture = Light->GetShadowMapTexture();
+		if(Texture && Texture->GetDSV())
+		{
+			const FString AtlasShaderPath = "Resources/Shader/AtlasDepthPreview.hlsl";
+			FShaderProgram* AtlasProgram = FRenderResourceManager::GetShaderProgram(AtlasShaderPath);
+			ID3D11PixelShader* AtlasPS = (AtlasProgram && AtlasProgram->PixelShader) ? AtlasProgram->PixelShader->GetShader() : nullptr;
+			ImTextureID TextureID = reinterpret_cast<ImTextureID>(Texture->GetSRV());
 
-        if (Texture && Texture->GetSRV())
-        {
-            ImGui::Image(reinterpret_cast<ImTextureID>(Texture->GetSRV()), ImVec2(256.0f, 256.0f));
-        }
+			ImVec2 UV0;
+			ImVec2 UV1;
+			bool bHasShadowMap = false;
+			if(USpotLightComponent* SpotLightComponent = Cast<USpotLightComponent>(Light))
+			{
+				FVector4 AtlasScaleOffset = SpotLightComponent->GetAtlasScaleOffset();
+				if(AtlasScaleOffset.X > 0.0f)
+				{
+					UV0 = ImVec2(AtlasScaleOffset.Z, AtlasScaleOffset.W);
+					UV1 = ImVec2(AtlasScaleOffset.Z + AtlasScaleOffset.X, AtlasScaleOffset.W + AtlasScaleOffset.Y);
+					bHasShadowMap = true;
+				}
+			}
+			else if(UPointLightComponent* PointLightComponent = Cast<UPointLightComponent>(Light))
+			{
+				static int SelectedFace = 0;
+				const char* FaceNames[6] = { "+X", "-X", "+Y", "-Y", "+Z", "-Z" };
+				ImGui::Combo("Cube Face", &SelectedFace, FaceNames, IM_ARRAYSIZE(FaceNames));
+
+				FVector4 AtlasScaleOffset = PointLightComponent->GetFaceAtlasScaleOffset(SelectedFace);
+				if(AtlasScaleOffset.X > 0.0f)
+				{
+					UV0 = ImVec2(AtlasScaleOffset.Z, AtlasScaleOffset.W);
+					UV1 = ImVec2(AtlasScaleOffset.Z + AtlasScaleOffset.X, AtlasScaleOffset.W + AtlasScaleOffset.Y);
+					bHasShadowMap = true;
+				}
+			}
+
+			if(bHasShadowMap)
+			{
+				ImDrawList* DrawList = ImGui::GetWindowDrawList();
+				if(AtlasPS)
+				{
+					DrawList->AddCallback(BindCascadePreviewPS, AtlasPS);
+				}
+				ImGui::Image(TextureID, ImVec2(256.0f, 256.0f), UV0, UV1, ImVec4(1, 1, 1, 1), ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+				if(AtlasPS)
+				{
+					DrawList->AddCallback(UnbindCascadePreviewSRV);
+					DrawList->AddCallback(ImGui::GetPlatformIO().DrawCallback_ResetRenderState);
+				}
+			}
+		}
 
         // 기존 이미지 아래.
         if (bDirectional)
@@ -1024,23 +1069,33 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
     if (bRenderShadows)
     {
         Renderer->SetShadowQuality(Settings.ShadowQuality);
+		Renderer->SetShadowResolutionQuality(static_cast<EShadowResolutionQuality>(Settings.ShadowResolutionQuality));
 		Renderer->SetPCSSMaxKernel(Settings.PCSSMaxKernel);
         Renderer->SetTransitionFactor(Settings.TransitionFactor);
 
+		const FMatrix CameraWorld = MultipleViewportsAdapter.GetEngineViewMatrix(ViewIndex).Inverse();
+		const FMatrix CameraProjection = MultipleViewportsAdapter.GetEngineProjectionMatrix(ViewIndex);
+
+		const float TanHalfFovX = 1.0f / CameraProjection.M[1][0];
+		const float TanHalfFovY = 1.0f / CameraProjection.M[2][1];
+
+
         {
             SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowDirectional);
-            Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+            Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
         }
 
         {
             SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowAtlas);
-            Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+			Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, TanHalfFovY, MultipleViewportsAdapter.GetViewRect(ViewIndex).Height, ViewMode);
         }
 
         {
             SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowCSM);
-            Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+
+            Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
         }
+		ViewWorld.GetScene().PostUpdateLightComponents(Renderer);    	
 
         if (ViewIndex == MultipleViewportsAdapter.GetEditorViewIndex())
         {
@@ -1375,7 +1430,12 @@ void UEditorEngine::DrawCascadeShadowPreviewContent()
         return;
     }
 
-    ImGui::Text("%u cascades, preview %u x %u", Count, FRenderer::CascadePreviewResolution, FRenderer::CascadePreviewResolution);
+	char Text[128];
+	std::snprintf(Text, sizeof(Text), "%u cascades, preview %u x %u", Count, FRenderer::CascadePreviewResolution, FRenderer::CascadePreviewResolution);
+
+	const float TextWidth = ImGui::CalcTextSize(Text).x;
+	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - TextWidth));
+	ImGui::TextDisabled("%s", Text);
 
     if (!ImGui::BeginTable("CascadeImages", 2))
         return;

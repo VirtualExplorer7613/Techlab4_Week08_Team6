@@ -220,14 +220,17 @@ void FScene::UpdateLightComponents(FRenderer *Renderer) {
       if (Constants.SpotLightCount >= NUM_SPOT_LIGHT) {
         continue;
       }
-      SpotLightComponent->SetShadowMapTexture(Renderer->GetSpotShadowMap());
+      SpotLightComponent->SetShadowMapTexture(Renderer->GetShadowMap());
+      SpotLightComponent->SetLightIndex(Constants.SpotLightCount);
       UpdateSpotLight(Constants, SpotLightComponent, TransitionFactor);
+      
     } else if (UPointLightComponent *PointLightComponent =
                    Cast<UPointLightComponent>(LightComponent)) {        
       if (Constants.PointLightCount >= NUM_POINT_LIGHT) {
         continue;
       }
-
+      PointLightComponent->SetShadowMapTexture(Renderer->GetShadowMap());
+      PointLightComponent->SetLightIndex(Constants.PointLightCount);
       UpdatePointLight(Constants, PointLightComponent, TransitionFactor);
     } else if (UAmbientLightComponent *AmbientLightComponent =
                    Cast<UAmbientLightComponent>(LightComponent)) {
@@ -242,6 +245,35 @@ void FScene::UpdateLightComponents(FRenderer *Renderer) {
   }
 
   Renderer->SetLight(Constants);
+}
+
+void FScene::PostUpdateLightComponents(FRenderer* Renderer)
+{
+    if(!Renderer)
+    {
+        return;
+    }
+
+    for(ULightComponentBase* LightComponent : LightComponents)
+    {
+        if(!LightComponent)
+        {
+            continue;
+        }
+
+        if(USpotLightComponent* SpotLightComponent = Cast<USpotLightComponent>(LightComponent))
+        {
+            SpotLightComponent->SetAtlasScaleOffset(Renderer->GetSpotLightData(SpotLightComponent->GetLightIndex()).AtlasScaleOffset);
+        }
+
+        else if(UPointLightComponent* PointLightComponent = Cast<UPointLightComponent>(LightComponent))
+        {
+            for(uint32 face = 0; face < 6; face++)
+            {
+                PointLightComponent->SetFaceAtlasScaleOffset(face, Renderer->GetPointLightData(PointLightComponent->GetLightIndex()).AtlasScaleOffset[face]);
+            }            
+        }
+    }
 }
 
 void FScene::RegisterLightComponent(ULightComponentBase *LightComponent) {
@@ -273,7 +305,8 @@ void FScene::UpdatePointLight(FLightConstants &LightConstants,
 
   PointData.PositionRadius =
       FVector4(Position.X, Position.Y, Position.Z,
-               std::max<float>(LightComponent->GetAttenuationRadius(), 0.001f));
+               std::max<float>(LightComponent->
+                   GetAttenuationRadius(), 0.001f));
 
   PointData.ColorIntensity =
       FVector4(Color.X, Color.Y, Color.Z,

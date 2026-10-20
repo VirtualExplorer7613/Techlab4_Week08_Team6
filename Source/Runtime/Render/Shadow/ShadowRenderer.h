@@ -12,11 +12,23 @@
 #include "Render/Texture2D.h"
 #include "Render/TextureCube.h"
 
-#define SHADOW_ATLAS_MAP_SIZE 1 << 14
-#define SHADOW_LOD_LEVEL_1 1024
-#define SHADOW_LOD_LEVEL_2 512
-#define SHADOW_LOD_LEVEL_3 256
-#define SHADOW_ATLAS_BORDER 5 // UberLit.hlsl이랑 맞춰야됨
+#define SHADOW_ATLAS_MAP_SIZE 1 << 13
+#define SHADOW_LOD_LEVEL_1 1 << 10
+#define SHADOW_LOD_LEVEL_2 1 << 9
+#define SHADOW_LOD_LEVEL_3 1 << 8
+#define SHADOW_LOD_LEVEL_4 1 << 7
+#define SHADOW_LOD_PIXEL_1 500.0f
+#define SHADOW_LOD_PIXEL_2 300.0f
+#define SHADOW_LOD_PIXEL_3 150.0f
+#define SHADOW_LOD_PIXEL_4 30.0f
+#define SHADOW_ATLAS_BORDER 5
+
+enum class EShadowResolutionQuality
+{
+    High = 0,
+    Medium = 1,
+    Low = 2
+};
 
 struct FShadowPassDesc
 {
@@ -28,12 +40,12 @@ struct FShadowPassDesc
 };
 
 const FCubeFaceDirection CubeFaceDirections[6] = {
-    {FVector(1.0f, 0.0f, 0.0f), FVector(0.0f, 1.0f, 0.0f)},  // +X
-    {FVector(-1.0f, 0.0f, 0.0f), FVector(0.0f, 1.0f, 0.0f)}, // -X
-    {FVector(0.0f, 1.0f, 0.0f), FVector(0.0f, 0.0f, -1.0f)}, // +Y
+    {FVector(1.0f, 0.0f, 0.0f), FVector(0.0f, 0.0f, 1.0f)},  // +X
+    {FVector(-1.0f, 0.0f, 0.0f), FVector(0.0f, 0.0f, 1.0f)}, // -X
+    {FVector(0.0f, 1.0f, 0.0f), FVector(0.0f, 0.0f, 1.0f)}, // +Y
     {FVector(0.0f, -1.0f, 0.0f), FVector(0.0f, 0.0f, 1.0f)}, // -Y
-    {FVector(0.0f, 0.0f, 1.0f), FVector(0.0f, 1.0f, 0.0f)},  // +Z
-    {FVector(0.0f, 0.0f, -1.0f), FVector(0.0f, 1.0f, 0.0f)}  // -Z
+    {FVector(0.0f, 0.0f, 1.0f), FVector(-1.0f, 0.0f, 0.0f)},  // +Z
+    {FVector(0.0f, 0.0f, -1.0f), FVector(1.0f, 0.0f, 0.0f)}  // -Z
 };
 
 // For returning result
@@ -58,6 +70,13 @@ struct FShadowQuadNode
     uint32 Size = 0;
     EShadowNodeState ShdowNodeState = EShadowNodeState::Free;
     int32 Children[4] = {-1, -1, -1, -1};
+};
+
+struct FShadowFrustum
+{
+    std::array<FVector, 8> Corners{};
+    FVector CenterWorld = FVector(0.0f, 0.0f, 0.0f);
+    float Radius = 0.0f;
 };
 
 class FShadowAtlasAllocator
@@ -195,10 +214,11 @@ public:
     FMatrix BuildDirectionalLightProjection(const FBox& LightSpaceBounds) const;
 
     // 카메라 Frustum을 지정된 그림자 거리까지 제한해 Directional Light VP를 계산한다.
-    FMatrix BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection) const;
+    FMatrix BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection, uint32 ShadowResolution) const;
 
     // Frustum 코너 8개를 받아 Directional Light VP를 계산한다.
-    FMatrix BuildDirectionalLightVPFromCorners(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection, float MinCasterDepth = std::numeric_limits<float>::infinity()) const;
+    //FMatrix BuildDirectionalLightVPFromCorners(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection, uint32 ShadowResolution, float MinCasterDepth = std::numeric_limits<float>::infinity()) const;
+    FMatrix BuildDirectionalLightVPFromCorners(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection, uint32 ShadowResolution, float MinCasterDepth = std::numeric_limits<float>::infinity(), float StableRadius = 0.0f) const;
 
     // Frustum의 원거리 꼭짓점을 ShadowDistance에 맞춰 보간한다.
     std::array<FVector, 8> LimitFrustumToShadowDistance(const std::array<FVector, 8>& Corners, float CameraNear, float CameraFar, float ShadowDistance) const;

@@ -54,6 +54,15 @@ void FSettingsPanel::OnRender()
     {
         Settings.ShadowQuality = Quality;
     }
+
+	static const char* ShadowResolutionLabels[] = { "High", "Medium", "Low" };
+	int ShadowResolution = static_cast<int>(Settings.ShadowResolutionQuality);
+	ImGui::SetNextItemWidth(200.0f);
+	if(ImGui::Combo("Shadow Resolution Quality", &ShadowResolution, ShadowResolutionLabels, IM_ARRAYSIZE(ShadowResolutionLabels)))
+	{
+		Settings.ShadowResolutionQuality = ShadowResolution;
+	}
+
     ImGui::SliderFloat("Soft Transition", &Settings.TransitionFactor, 0.0f, 10.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 
 	ImGui::SliderInt("PCSSMaxKernel", &Settings.PCSSMaxKernel, 1, 32, "%d", ImGuiSliderFlags_AlwaysClamp);

@@ -957,6 +957,20 @@ float3 ApplyCascadeDebugColor(float3 shadedColor, float3 worldPos, float3 normal
 
     uint cascadeIndex = SelectDebugCascade(worldPos);
     float3 debugColor = GetDebugCascadeColor(cascadeIndex);
+    
+    if (CascadeBlendEnabled != 0 && cascadeIndex + 1 < CascadeCount)
+    {
+        float blendStart = CascadeSplitDepths[cascadeIndex];
+        float blendEnd = CascadeBlendEndDepths[cascadeIndex];
+
+        if (blendEnd > blendStart && viewDepth > blendStart)
+        {
+            float t = saturate((viewDepth - blendStart) / (blendEnd - blendStart));
+
+            float3 nextColor = GetDebugCascadeColor(cascadeIndex + 1);
+            debugColor = lerp(debugColor, nextColor, t);
+        }
+    }
 
     return lerp(shadedColor, debugColor, shadowAmount);
 }
