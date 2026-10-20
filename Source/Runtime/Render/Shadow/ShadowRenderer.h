@@ -17,6 +17,10 @@
 #define SHADOW_LOD_LEVEL_2 1 << 9
 #define SHADOW_LOD_LEVEL_3 1 << 8
 #define SHADOW_LOD_LEVEL_4 1 << 7
+#define SHADOW_LOD_PIXEL_1 500.0f
+#define SHADOW_LOD_PIXEL_2 300.0f
+#define SHADOW_LOD_PIXEL_3 150.0f
+#define SHADOW_LOD_PIXEL_4 30.0f
 #define SHADOW_ATLAS_BORDER 5
 
 enum class EShadowResolutionQuality

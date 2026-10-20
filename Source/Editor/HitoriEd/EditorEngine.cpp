@@ -1086,7 +1086,7 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 
         {
             SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowAtlas);
-            Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+			Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, TanHalfFovY, MultipleViewportsAdapter.GetViewRect(ViewIndex).Height, ViewMode);
         }
 
         {
