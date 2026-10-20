@@ -60,8 +60,10 @@ struct alignas(16) FPointLight
 	FVector4 ColorIntensity = FVector4(0, 0, 0, 0); // rgb: 색상, w: 강도
 	FVector4 FalloffEnabled = FVector4(1, 0, 0, 0); // x: 반경 감쇠, y: 사용 여부, zw: 패딩
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    FMatrix ViewProjection[6];
+    FVector4 AtlasScaleOffset[6]; // xy : scale, zw : offset
 };
-static_assert(sizeof(FPointLight) == 64, "FPointLight must be 64 bytes");
+static_assert(sizeof(FPointLight) == 544, "FPointLight must be 544 bytes");
 
 struct alignas(16) FSpotLight
 {
@@ -72,8 +74,9 @@ struct alignas(16) FSpotLight
 	FVector4 ForwardVector = FVector4(1, 0, 0, 0);		// xyz : 전방벡터
     FMatrix ViewProjection;                            // ViewProjection 행렬. 그림자 맵을 만들 때 사용
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    FVector4 AtlasScaleOffset; // xy : scale, zw : offset
 };
-static_assert(sizeof(FSpotLight) == 160, "FSpotLight must be 80 bytes");
+static_assert(sizeof(FSpotLight) == 176, "FSpotLight must be 176 bytes");
 
 struct alignas(16) FAmbientLight
 {
@@ -108,7 +111,8 @@ struct alignas(16) FLightGlobalConstants
 	FDirectionalLight	DirectionalLight;
 	uint32 PointLightCount = 0;
 	uint32 SpotLightCount = 0;
-	uint32 Padding[2] = {};
+    uint32 bShowShadows = 1;
+    uint32 Padding = 0;
 };
 static_assert(sizeof(FLightGlobalConstants) == 144, "FLightGlobalConstants must match UberLit LightConstants");
 
@@ -200,6 +204,8 @@ public:
     void RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
     void RenderPointShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
 
+    void RenderShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
 	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World)
 	{
@@ -241,6 +247,8 @@ public:
 	uint32 GetPointLightCount() const { return LightData.PointLightCount; }
 	uint32 GetSpotLightCount() const { return LightData.SpotLightCount; }
 
+    void SetShadowsEnabled(bool bEnabled);
+
     FTexture2D *GetDirectionalShadowMap() const
     {
         return ShadowRenderer ? ShadowRenderer->GetDirectionalShadowMap() : nullptr;
@@ -254,6 +262,10 @@ public:
     {
         return ShadowRenderer ? ShadowRenderer->GetPointLightShadowMap() : nullptr;
     }
+    FTexture2D* GetShadowMap() const
+    {
+        return ShadowRenderer ? ShadowRenderer->GetShadowMapAtlas() : nullptr;
+    }
 
     ID3D11ShaderResourceView *GetSpotShadowMapSRV() const
     {
@@ -265,6 +277,12 @@ public:
     {
         FTexture2D *DirectionalShadowMap = GetDirectionalShadowMap();
         return DirectionalShadowMap ? DirectionalShadowMap->GetSRV() : nullptr;
+    }
+
+    ID3D11ShaderResourceView* GetShadowMapSRV() const
+    {
+        FTexture2D* ShadowMap = GetShadowMap();
+        return ShadowMap ? ShadowMap->GetSRV() : nullptr;
     }
 
     const FCascadeShadowMaps &GetCascadeShadowMaps() const
@@ -394,6 +412,8 @@ private:
 
 	//DepthPrepass가 이전에 실행되었다면 true, Opaque pass에서만 사용됨
 	bool bDepthPrepassed = false;
+
+    bool bShadowsEnabled = true;
 
     // Shadow map pass에서만 사용
     bool bShadowMapPass = false;

@@ -22,6 +22,8 @@ struct FPointLightInfo
     float4 ColorIntensity;
     float4 FalloffEnabled;
     float4 ShadowParameters;
+    matrix ViewProjection[6];
+    float4 AtlasScaleOffset[6];
 };
 
 struct FSpotLightInfo
@@ -33,6 +35,7 @@ struct FSpotLightInfo
     float4 FowardVector;
     matrix ViewProjection;
     float4 ShadowParameters;
+    float4 AtlasScaleOffset;
 };
 
 //Tile Culling에 필요한 상수 버퍼

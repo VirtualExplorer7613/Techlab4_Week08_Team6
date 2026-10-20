@@ -6,6 +6,8 @@
 
 #include "Engine/World.h"
 
+#include <limits>
+
 // 종료 시 렌더·에디터·뷰포트 설정을 함께 저장한다.
 FSettingsPanel::~FSettingsPanel()
 {
@@ -39,24 +41,16 @@ void FSettingsPanel::OnRender()
 	ImGui::SeparatorText("Rendering");
 
 	ImGui::TextDisabled("Fill mode is configured per viewport.");
-	ImGui::Checkbox("Draw Primitives", &Settings.bDrawPrimitives);
-	ImGui::Checkbox("Draw Bounding Box", &Settings.bDrawBoundingBox);
-	ImGui::Checkbox("Show Object UUID", &Settings.bShowUUID);
 	ImGui::Checkbox("FXAA", &Settings.bEnableFXAA);
 	ImGui::Checkbox("Depth View", &Settings.bDepthView);
 	ImGui::Checkbox("Tile-Based Light Culling", &Settings.bTileBasedLightCulling);
-	ImGui::Checkbox("Exponential Height Fog", &Settings.bExponentialHeightFog);
 	//////////////////////////////////////////////////////////
 
 	ImGui::Dummy(ImVec2(0.0f, SectionGap));
 	ImGui::SeparatorText("Grid");
 
-	ImGui::Checkbox("Draw Batch Line / Grid", &Settings.bDrawBatchLine);
-	ImGui::Checkbox("Draw PS Grid", &Settings.bDrawPSGrid);
-
 	ImGui::SetNextItemWidth(200.0f);
 	ImGui::SliderInt("Grid Spacing", &Settings.GridSpacing, 1, 100);
-
 	//////////////////////////////////////////////////////////
 
 	// 에디터 수치 설정 (Values)
@@ -114,11 +108,6 @@ bool FSettingsPanel::SaveSettings() const
 	}
 
 	File << "[Rendering]\n";
-	File << "DrawPrimitives=" << Settings.bDrawPrimitives << "\n";
-	File << "DrawBoundingBox=" << Settings.bDrawBoundingBox << "\n";
-	File << "ShowUUID=" << Settings.bShowUUID << "\n";
-	File << "DrawBatchLine=" << Settings.bDrawBatchLine << "\n";
-	File << "DrawPSGrid=" << Settings.bDrawPSGrid << "\n";
 	File << "EnableFXAA=" << Settings.bEnableFXAA << "\n";
 	File << "\n";
 
@@ -140,6 +129,9 @@ bool FSettingsPanel::SaveSettings() const
         File << "View" << Index << "OrthoWidth=" << Snapshot.ViewOrthoWidth[Index] << "\n";
         File << "View" << Index << "Preset=" << Snapshot.ViewPreset[Index] << "\n";
         File << "View" << Index << "ViewMode=" << Snapshot.ViewMode[Index] << "\n";
+        const EShowFlags Flags = Snapshot.ViewShowFlags[Index] >= 0
+            ? static_cast<EShowFlags>(Snapshot.ViewShowFlags[Index]) : FMultipleViewportsAdapter::DefaultShowFlags;
+        File << "View" << Index << "ShowFlags=" << static_cast<uint32>(Flags) << "\n";
         File << "View" << Index << "LocationX=" << Snapshot.ViewLocation[Index].X << "\n";
         File << "View" << Index << "LocationY=" << Snapshot.ViewLocation[Index].Y << "\n";
         File << "View" << Index << "LocationZ=" << Snapshot.ViewLocation[Index].Z << "\n";
@@ -163,10 +155,12 @@ bool FSettingsPanel::LoadSettings()
 
 	uint8 LocationComponentMasks[4]{};
 	uint8 RotationComponentMasks[4]{};
+	EShowFlags LegacyShowFlags = FMultipleViewportsAdapter::DefaultShowFlags;
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
 		Settings.bViewLocationSaved[Index] = false;
 		Settings.bViewRotationSaved[Index] = false;
+		Settings.ViewShowFlags[Index] = -1;
 	}
 
 	std::string Line;
@@ -186,6 +180,17 @@ bool FSettingsPanel::LoadSettings()
                 {
                     FString Prefix = "View";
                     Prefix += static_cast<char>('0' + Index);
+                    if (Key == Prefix + "ShowFlags")
+                    {
+                        std::istringstream FlagNumber(ValueStr);
+                        int64 Value = -1;
+                        if ((FlagNumber >> Value) && Value >= 0 && Value <= std::numeric_limits<uint32>::max() &&
+                            (FlagNumber >> std::ws).eof())
+                        {
+                            Settings.ViewShowFlags[Index] = Value;
+                        }
+                        continue;
+                    }
                     std::istringstream Number(ValueStr);
                     float Value = 0;
                     if (!(Number >> Value) || !std::isfinite(Value)) continue;
@@ -198,9 +203,6 @@ bool FSettingsPanel::LoadSettings()
                         Settings.ViewPreset[Index] = static_cast<int32>(Value);
                     else if (Key == Prefix + "ViewMode" && Value >= 0 && Value < static_cast<int32>(EViewMode::MAX) && Value == static_cast<int32>(Value))
                         Settings.ViewMode[Index] = static_cast<int32>(Value);
-                    // 구형 ini의 View별 Wireframe 키는 ViewMode가 없을 때만 Wireframe 모드로 옮긴다.
-                    else if (Key == Prefix + "Wireframe" && Value == 1 && Settings.ViewMode[Index] < 0)
-                        Settings.ViewMode[Index] = static_cast<int32>(EViewMode::Wireframe);
                     else if (Key == Prefix + "LocationX")
                     {
                         Settings.ViewLocation[Index].X = Value;
@@ -237,12 +239,18 @@ bool FSettingsPanel::LoadSettings()
                         RotationComponentMasks[Index] |= 1 << 3;
                     }
                 }
-                if (Key == "Wireframe") Settings.bWireframe = std::stoi(ValueStr);
-				else if (Key == "DrawPrimitives") Settings.bDrawPrimitives = std::stoi(ValueStr);
-				else if (Key == "DrawBoundingBox") Settings.bDrawBoundingBox = std::stoi(ValueStr);
-				else if (Key == "ShowUUID") Settings.bShowUUID = std::stoi(ValueStr);
-				else if (Key == "DrawBatchLine") Settings.bDrawBatchLine = std::stoi(ValueStr);
-				else if (Key == "DrawPSGrid") Settings.bDrawPSGrid = std::stoi(ValueStr);
+				EShowFlags LegacyFlag = EShowFlags::None;
+                if (Key == "DrawPrimitives") LegacyFlag = EShowFlags::Primitives;
+				else if (Key == "DrawBoundingBox") LegacyFlag = EShowFlags::BoundingBox;
+				else if (Key == "ShowUUID") LegacyFlag = EShowFlags::UUID;
+				else if (Key == "DrawBatchLine") LegacyFlag = EShowFlags::BatchLine;
+				else if (Key == "DrawPSGrid") LegacyFlag = EShowFlags::PSGrid;
+				else if (Key == "ExponentialHeightFog") LegacyFlag = EShowFlags::ExponentialHeightFog;
+				else if (Key == "ShowShadows") LegacyFlag = EShowFlags::Shadows;
+				if (LegacyFlag != EShowFlags::None)
+				{
+					LegacyShowFlags = std::stoi(ValueStr) != 0 ? (LegacyShowFlags | LegacyFlag) : (LegacyShowFlags & ~LegacyFlag);
+				}
 				else if (Key == "EnableFXAA") Settings.bEnableFXAA = std::stoi(ValueStr);
 
 				else if (Key == "CameraMoveSpeed") Settings.CameraSpeed = std::stof(ValueStr);
@@ -263,6 +271,9 @@ bool FSettingsPanel::LoadSettings()
 	File.close();
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
+		// 새 View 값이 있으면 파일 내 공통 키의 순서와 무관하게 우선한다.
+		if (Settings.ViewShowFlags[Index] < 0)
+			Settings.ViewShowFlags[Index] = static_cast<uint32>(LegacyShowFlags);
 		Settings.bViewLocationSaved[Index] = LocationComponentMasks[Index] == 0x7;
 		if (RotationComponentMasks[Index] == 0xF)
 		{
@@ -303,6 +314,7 @@ void FSettingsPanel::ReadViewportSettings(FEditorSettings& Out) const
         Out.ViewOrthoWidth[Index] = Camera.Projection.OrthoWidth;
         Out.ViewPreset[Index] = static_cast<int32>(ViewportAdapter->GetCameraPreset(Index));
         Out.ViewMode[Index] = static_cast<int32>(ViewportAdapter->GetViewMode(Index));
+        Out.ViewShowFlags[Index] = static_cast<uint32>(ViewportAdapter->GetShowFlags(Index));
         Out.ViewLocation[Index] = Camera.Transform.Location;
         Out.ViewRotation[Index] = Camera.Transform.Rotation;
         Out.bViewLocationSaved[Index] = true;
@@ -313,7 +325,7 @@ void FSettingsPanel::ReadViewportSettings(FEditorSettings& Out) const
 // 종료 시 Adapter를 읽지 않도록 살아 있는 동안 저장용 설정을 갱신한다.
 void FSettingsPanel::CaptureViewportSettings() { ReadViewportSettings(Settings); }
 
-// 저장 프리셋·투영·표시를 슬롯별로 복원하며 구형 ini는 초기값과 공통 Wireframe을 사용한다.
+// 저장 프리셋·투영·표시를 슬롯별로 복원하며 미저장 ViewMode는 기본값을 사용한다.
 void FSettingsPanel::ApplyViewportSettings()
 {
     if (!ViewportAdapter) return;
@@ -333,8 +345,10 @@ void FSettingsPanel::ApplyViewportSettings()
         EViewMode Mode = EViewMode::Lit_Phong;
         if (Settings.ViewMode[Index] >= 0)
             Mode = static_cast<EViewMode>(Settings.ViewMode[Index]);
-        else if (Settings.bWireframe)
-            Mode = EViewMode::Wireframe;
         ViewportAdapter->SetViewMode(Index, Mode);
+        const EShowFlags Flags = Settings.ViewShowFlags[Index] >= 0
+            ? static_cast<EShowFlags>(Settings.ViewShowFlags[Index]) : FMultipleViewportsAdapter::DefaultShowFlags;
+        ViewportAdapter->SetShowFlag(Index, ViewportAdapter->GetShowFlags(Index), false);
+        ViewportAdapter->SetShowFlag(Index, Flags, true);
     }
 }
