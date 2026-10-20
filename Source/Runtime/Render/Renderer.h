@@ -317,7 +317,7 @@ public:
     void SetCSMDistributionExponent(float Value)
     {
         // UI 외부에서 변경해도 범위 보장
-        CSMDistributionExponent = Value < 0.1f ? 0.1f : (Value > 10.0f ? 10.0f : Value);
+        CSMDistributionExponent = Value < 1.0f ? 1.0f : (Value > 10.0f ? 10.0f : Value);
     }
 
     void SetCSMEnabled(bool bEnabled)
@@ -342,9 +342,16 @@ public:
 
     void CaptureCascadePreview();
 
-    const FCascadeShadowMaps &GetCascadePreviewMaps() const
+    static constexpr uint32 CascadePreviewResolution = 200;
+
+    uint32 GetCascadePreviewCount() const
     {
-        return CascadePreviewMaps;
+        return CascadePreviewCount;
+    }
+
+    const FTexture2D *GetCascadePreviewTexture(uint32 Index) const
+    {
+        return Index < CascadePreviewCount ? CascadePreviewTextures[Index].get() : nullptr;
     }
 
     // 변경 요청만 저장한다.
@@ -429,6 +436,8 @@ private:
     bool bShadowMapPass = false;
 
     FCascadeDebugConstants CascadeConstants{};
+    // 각 Cascade의 Shadow Pass에 사용할 CPU 측 목록.
+    TArray<FPrimitiveSceneProxy *> CascadeShadowCasters[4];
     bool bCSMEnabled = true;
     float CSMShadowDistance = 40.0f;
     float CSMDistributionExponent = 3.0f;
@@ -436,7 +445,10 @@ private:
     FCascadeShadowMaps CascadeShadowMaps;
     bool bCascadeDebugColors = false;
     bool bCascadeBlendEnabled = false;
-    FCascadeShadowMaps CascadePreviewMaps;
+    TUniquePtr<FTexture2D> CascadePreviewTextures[FCascadeShadowMaps::MaxCascades];
+    // 마지막으로 캡처한 이미지 개수
+    uint32 CascadePreviewCount = 0;
+    bool InitCascadePreviewResources();
     TUniquePtr<FConstantBuffer> CascadeDebugCB;
     void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
     void RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, EViewMode ViewMode);

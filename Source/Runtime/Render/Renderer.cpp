@@ -114,6 +114,12 @@ bool FRenderer::Init()
         return false;
     }
 
+    if (!InitCascadePreviewResources())
+    {
+        HTR_LOG(Error, "[CSM] Failed to create preview resources.");
+        return false;
+    }
+
 	if (!CreateDynamicStructuredBuffer(sizeof(FPointLight), NUM_POINT_LIGHT, PointLightBuffer, PointLightSRV) || !CreateDynamicStructuredBuffer(sizeof(FSpotLight), NUM_SPOT_LIGHT, SpotLightBuffer, SpotLightSRV))
 	{
 		HTR_LOG(Error, "[Renderer] Failed to create dynamic structured buffers for lights.");
@@ -224,7 +230,7 @@ void FRenderer::RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &C
         Desc.Width = CascadeShadowMaps.GetResolution();
         Desc.Height = CascadeShadowMaps.GetResolution();
 
-        if (!RenderShadowDepth(Scene, Desc, CascadeConstants.LightVP[Index], ViewMode))
+        if (!RenderShadowDepth(Scene, Desc, CascadeConstants.LightVP[Index], ViewMode, &CascadeShadowCasters[Index]))
         {
             // 일부 맵만 생성된 경우 일반 그림자
             CascadeConstants.CSMEnabled = 0;
@@ -253,9 +259,55 @@ void FRenderer::PrepareCascadeShadows(const FScene &Scene, const FMatrix &Camera
     RenderCascadeShadowPreview(Scene, CameraViewProjection, CameraLocation, ViewMode);
 }
 
-void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic)
+bool FRenderer::InitCascadePreviewResources()
+{
+    ID3D11DeviceContext *Context = RenderCommand::GetContext();
+    if (!Context)
+        return false;
+
+    D3D11_TEXTURE2D_DESC Desc{};
+    Desc.Width = CascadePreviewResolution;
+    Desc.Height = CascadePreviewResolution;
+    Desc.MipLevels = 1;
+    Desc.ArraySize = 1;
+    Desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    Desc.SampleDesc.Count = 1;
+    Desc.Usage = D3D11_USAGE_DEFAULT;
+    Desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+    const float ClearColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+
+    for (uint32 Index = 0; Index < FCascadeShadowMaps::MaxCascades; ++Index)
+    {
+        auto Texture = RenderCommand::CreateTexture2D(Desc);
+
+        if (!Texture || !Texture->GetRawPtr() || !Texture->GetRTV() || !Texture->GetSRV())
+        {
+            return false;
+        }
+
+        Context->ClearRenderTargetView(Texture->GetRTV(), ClearColor);
+
+        CascadePreviewTextures[Index] = std::move(Texture);
+    }
+
+    CascadePreviewCount = 0;
+    return true;
+}
+
+void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,
+                                            const FMatrix &CameraViewProjection,
+                                            const FVector &CameraForward,
+                                            float CameraNear,
+                                            float CameraFar,
+                                            bool bOrthographic)
 {
     CascadeConstants = {};
+
+    for (auto &Casters : CascadeShadowCasters)
+    {
+        Casters.Reset();
+    }
 
     CascadeConstants.BlendEnabled = bCascadeBlendEnabled ? 1u : 0u;
 
@@ -293,8 +345,9 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
         const FVector LightDirection(Direction.X, Direction.Y, Direction.Z);
         const auto CameraCorners = GetFrustumCornersWorld(CameraViewProjection);
 
-        // 현재 분할 정책 E = 3;
+        // 기본 분할 정책 E = 3;
         //constexpr float DistributionExponent = 3.0f;
+        // 
 
         const float DistributionExponent = CSMDistributionExponent;
 
@@ -430,61 +483,55 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
 
             
             // ──────────────────────
-            // 전체 카메라 프러스텀에서 이번 구간만 잘라내기
+            // Cascade 그림자 생성 후보 수집
             // ──────────────────────
 
             // SplitCorners가 나타내는 공간을 기준으로 light camera를 배치하고,
             // LightDirection 방향을 바라보도록 한다.
             //
-            // 이 행렬은 World Space 좌표를 Light View Space로 변환한다.
-            // 아직 Projection까지는 안한 상태
+            // 이번 Cascade 범위에 맞는 컬링용 Light ViewProjection을 만든다.
+            // 투영된 경계의 X/Y 범위로 그림자 맵 영역과 겹치는 물체를 찾는다.
+
+            const FMatrix CullingLightVP = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection);
+
+            TArray<FPrimitiveSceneProxy *> &ShadowCasters = CascadeShadowCasters[Index];
+
+            Scene.BVH.Query(
+                [&CullingLightVP](const FBox &WorldBounds) {
+                    const FBox ProjectedBounds = WorldBounds.GetWorldAABB(CullingLightVP);
+
+                    // 깊이는 이후 caster를 기준으로 확장하므로 여기서는 검사하지 않는다.
+                    return ProjectedBounds.Min.X <= 1.0f && ProjectedBounds.Max.X >= -1.0f &&
+                           ProjectedBounds.Min.Y <= 1.0f && ProjectedBounds.Max.Y >= -1.0f;
+                },
+                [&ShadowCasters](FPrimitiveSceneProxy *Proxy) {
+                    if (!Proxy || !Proxy->IsVisible() || !Proxy->GetCastShadows() || !Proxy->GetMesh() || !Proxy->GetRenderState() || Proxy->GetLODCount() == 0)
+                    {
+                        return;
+                    }
+
+                    ShadowCasters.Add(Proxy);
+                });
 
             const FMatrix LightView = ShadowRenderer->BuildDirectionalLightView(SplitCorners, LightDirection);
 
-            // 가장 작은 Caster 깊이를 찾기 위한 초기값.
-            float MinCasterDepth = std::numeric_limits<float>::infinity();
+            const FBox ReceiverBounds = ShadowRenderer->CalculateLightSpaceBounds(SplitCorners, LightView);
 
-            // 카메라에 보이는 물체 목록만 사용하지 않고,
-            // Scene에 등록된 전체 Proxy를 확인한다.
-            //
-            // 카메라 밖에 있는 물체도 화면 안으로 그림자를 드리울 수 있다.
-            //
+            float MinCasterDepth = ReceiverBounds.Min.X;
 
-            for (const FPrimitiveSceneProxy* Proxy : Scene.Proxies)
+            // Receiver의 최소 깊이를 기준으로,
+            // 수집된 caster가 더 광원 쪽에 있으면 Near 경계를 확장한다.
+            for (const FPrimitiveSceneProxy* Proxy : ShadowCasters)
             {
-                // 그림자 생성에 사용할 수 없는 물체는 제외한다.
-                // IsVisible()은 물체 자체의 표시 상태
-
-                if (!Proxy || !Proxy->IsVisible() || !Proxy->GetCastShadows() || !Proxy->GetMesh() || !Proxy->GetRenderState())
-                {
-                    continue;
-                }
-
-                // 물체를 감싸는 World Space AABB.
                 const FAABB &Bounds = Proxy->GetBounds();
 
-                // Center/Extent 표현을 Min/Max 표현으로 변환한다.
                 const FBox WorldBounds{Bounds.Center - Bounds.Extent, Bounds.Center + Bounds.Extent};
 
+                 const FBox LightBounds = WorldBounds.GetWorldAABB(LightView);
 
-                // 물체의 경계 상자를 Light View Space로 변환하고,
-                // 변환된 상자를 감싸는 AABB를 구한다. 
-                const FBox LightBounds = WorldBounds.GetWorldAABB(LightView);
-
-                // X축이 깊이축이다.
-                // Min.X는 해당 물체 경계 상자의 광원 쪽 깊이
-                // 이 값을 이용해 투영의 Near 경계를 광원 쪽으로 확장하면
-                // 카메라 구간보다 광원 쪽에 있는 물체도 잘리지 않는다.
-                MinCasterDepth = std::min(MinCasterDepth, LightBounds.Min.X);
+                 MinCasterDepth = std::min(MinCasterDepth, LightBounds.Min.X);
             }
 
-            // ──────────────────────
-            // 이번 Cascade 최종 LightVP 생성 및 저장
-            // ──────────────────────
-
-            // SplitCorners: 그림자를 받을 카메라 구간의 공간적 범위
-            // LightDirection: 광원이 바라보는 방향.
-            // MinCasterDepth: 그림자를 만드는 물체까지 포함하도록 깊이 범위를 확장할 기준.
             CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, MinCasterDepth);
 
             SplitNear = SplitFar;
@@ -524,17 +571,76 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
 
 void FRenderer::CaptureCascadePreview()
 {
+    const uint32 Count = CascadeShadowMaps.GetCascadeCount();
+
     // 새 CSM이 없으면 이전 미리보기를 유지한다.
-    if (!bCSMEnabled || CascadeConstants.CSMEnabled == 0 || CascadeConstants.CascadeCount == 0 ||
-        CascadeConstants.CascadeCount != CascadeShadowMaps.GetCascadeCount())
+    if (!bCSMEnabled || CascadeConstants.CSMEnabled == 0 || Count == 0 || Count > FCascadeShadowMaps::MaxCascades || CascadeConstants.CascadeCount != Count)
     {
         return;
     }
 
-    // 미리보기 셰이더가 사용했던 t0 연결을 해제한다.
+    ID3D11DeviceContext *Context = RenderCommand::GetContext();
+
+    if (!Context)
+        return;
+
+    const FString ShaderPath = "Resources/Shader/CascadeDepthPreview.hlsl";
+
+    FShaderProgram *Program = FRenderResourceManager::GetShaderProgram(ShaderPath);
+
+    // 로드 실패 시 반환될 수 있는 기본 셰이더도 제외한다.
+    if (!Program || Program->SourcePath != ShaderPath || !Program->VertexShader || !Program->VertexShader->IsValid() || !Program->PixelShader || !Program->PixelShader->IsValid())
+    {
+        return;
+    }
+
+    for (uint32 Index = 0; Index < Count; ++Index)
+    {
+        const FTexture2D *Preview = CascadePreviewTextures[Index].get();
+
+        if (!Preview || !Preview->GetRTV() || !CascadeShadowMaps.GetSliceSRV(Index))
+        {
+            return;
+        }
+    }
+
+    // 이전 ImGui 패스가 읽던 컬러 텍스처를 해제한다.
+    RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+
+    Context->OMSetRenderTargets(0, nullptr, nullptr);
+
+    RenderCommand::BindShaderProgram(Program);
+    RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    RenderCommand::SetRasterizerState(ERasterizerState::SolidNone);
+    RenderCommand::SetDepthStencilState(EDepthStencilState::Disabled);
+    RenderCommand::SetBlendState(EBlendState::Opaque);
+
+    RenderCommand::SetViewport(0, 0, CascadePreviewResolution, CascadePreviewResolution);
+
+    for (uint32 Index = 0; Index < Count; ++Index)
+    {
+        ID3D11RenderTargetView *DestinationRTV = CascadePreviewTextures[Index]->GetRTV();
+
+        ID3D11ShaderResourceView *SourceSRV = CascadeShadowMaps.GetSliceSRV(Index);
+
+        // 깊이 타깃 없이 컬러 텍스처에만 기록한다.
+        Context->OMSetRenderTargets(1, &DestinationRTV, nullptr);
+
+        Context->PSSetShaderResources(0, 1, &SourceSRV);
+
+        RenderCommand::Draw(3);
+    }
+
     RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel);
 
-    CascadePreviewMaps.CopyFrom(CascadeShadowMaps);
+    // ImGui가 컬러 텍스처를 SRV로 읽을 수 있도록 해제한다.
+    Context->OMSetRenderTargets(0, nullptr, nullptr);
+
+    RenderCommand::SetRasterizerState(ERasterizerState::SolidBack);
+    RenderCommand::SetDepthStencilState(EDepthStencilState::Default);
+
+    CascadePreviewCount = Count;
 }
 
 bool FRenderer::RequestCSMSettings(uint32 Resolution, uint32 CascadeCount)
@@ -1195,25 +1301,15 @@ bool FRenderer::RecreateCSMResources(const FCSMSettings &NewSettings)
 
     // 기존 리소스는 아직 변경하지 않는다.
     FCascadeShadowMaps NewShadowMaps;
-    FCascadeShadowMaps NewPreviewMaps;
 
     if (!NewShadowMaps.Init(NewSettings.Resolution, NewSettings.CascadeCount))
     {
         return false;
     }
 
-    if (!NewPreviewMaps.Init(NewSettings.Resolution, NewSettings.CascadeCount))
-    {
-        return false;
-    }
-
-    // 새 리소스는 모두 생성되었음.
-    // 첫 캡처 전에도 미리보기를 표시할 수 있도록 초기화한다.
     for (uint32 Index = 0; Index < NewSettings.CascadeCount; ++Index)
     {
         Context->ClearDepthStencilView(NewShadowMaps.GetSliceDSV(Index), D3D11_CLEAR_DEPTH, 1.0f, 0);
-
-        Context->ClearDepthStencilView(NewPreviewMaps.GetSliceDSV(Index), D3D11_CLEAR_DEPTH, 1.0f, 0);
     }
 
     // Init 또는 View의 CSM 준비 단계에서만 호출한다.
@@ -1223,10 +1319,7 @@ bool FRenderer::RecreateCSMResources(const FCSMSettings &NewSettings)
 
     RenderCommand::UnbindShaderResource(13, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
-    // 두 생성이 모두 성공한 경우에만 기존 배열을 교체한다.
     CascadeShadowMaps = std::move(NewShadowMaps);
-    CascadePreviewMaps = std::move(NewPreviewMaps);
-
     CSMSettings = NewSettings;
 
     // 새 설정에 맞는 상수는 이후 각 View에서 다시 계산한다.
