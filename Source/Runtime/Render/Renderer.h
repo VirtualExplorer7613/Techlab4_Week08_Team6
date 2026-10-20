@@ -111,7 +111,8 @@ struct alignas(16) FLightGlobalConstants
 	FDirectionalLight	DirectionalLight;
 	uint32 PointLightCount = 0;
 	uint32 SpotLightCount = 0;
-	uint32 Padding[2] = {};
+    uint32 bShowShadows = 1;
+    uint32 Padding = 0;
 };
 static_assert(sizeof(FLightGlobalConstants) == 144, "FLightGlobalConstants must match UberLit LightConstants");
 
@@ -232,6 +233,8 @@ public:
 
 	uint32 GetPointLightCount() const { return LightData.PointLightCount; }
 	uint32 GetSpotLightCount() const { return LightData.SpotLightCount; }
+
+    void SetShadowsEnabled(bool bEnabled);
 
     FTexture2D *GetDirectionalShadowMap() const
     {
@@ -371,6 +374,8 @@ private:
 
 	//DepthPrepass가 이전에 실행되었다면 true, Opaque pass에서만 사용됨
 	bool bDepthPrepassed = false;
+
+    bool bShadowsEnabled = true;
 
     // Shadow map pass에서만 사용
     bool bShadowMapPass = false;

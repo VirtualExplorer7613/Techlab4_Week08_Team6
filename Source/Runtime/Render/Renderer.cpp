@@ -1039,6 +1039,7 @@ void FRenderer::UploadLightGlobalConstants(const FMatrix &DirectionalLightVP)
     Globals.DirectionalLight.ViewProjection = DirectionalLightVP;
     Globals.PointLightCount = LightData.PointLightCount;
     Globals.SpotLightCount = LightData.SpotLightCount;
+    Globals.bShowShadows = bShadowsEnabled ? 1u : 0u;
 
     RenderCommand::UpdateBufferData(LightCB.get(), &Globals, sizeof(FLightGlobalConstants));
 }
@@ -1053,6 +1054,11 @@ void FRenderer::SetLight(const FLightConstants &InLightData)
     UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
 }
 
+void FRenderer::SetShadowsEnabled(bool bEnabled)
+{
+    bShadowsEnabled = bEnabled;
+    UploadLightGlobalConstants(LightData.DirectionalLight.ViewProjection);
+}
 
 void FRenderer::DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters)
 {
