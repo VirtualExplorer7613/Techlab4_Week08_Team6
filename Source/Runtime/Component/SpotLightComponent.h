@@ -29,10 +29,15 @@ public:
 	float GetConeFalloffExponent() const { return ConeFalloffExponent; }
 	void SetConeFalloffExponent(float InExponent) { ConeFalloffExponent = InExponent; }
 
+	FVector4 GetAtlasScaleOffset() const { return AtlasScaleOffset; }
+	void SetAtlasScaleOffset(FVector4 InAtlasScaleOffset) { AtlasScaleOffset = InAtlasScaleOffset; }
+
 private:
 	// 원뿔 중심축 기준 반각(도). 
 	float InnerConeAngle = 15.0f;
 	float OuterConeAngle = 30.0f;
 	// 안쪽/바깥 콘 사이 감쇠 곡선 지수 (D3D9 Falloff). 1.0 = 선형
 	float ConeFalloffExponent = 1.0f;
+
+	FVector4 AtlasScaleOffset = { 0.0f,0.0f,0.0f,0.0f };
 };

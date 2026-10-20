@@ -1133,8 +1133,8 @@ void FRenderer::SetLight(const FLightConstants &InLightData)
 
     UploadLightGlobalConstants(LightData.DirectionalLight.ViewProjection);
 
-    UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight) * LightData.PointLightCount);
-    UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
+    //UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight) * LightData.PointLightCount);
+    //UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
 }
 
 void FRenderer::SetShadowsEnabled(bool bEnabled)

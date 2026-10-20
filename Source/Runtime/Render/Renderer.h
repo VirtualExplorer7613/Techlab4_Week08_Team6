@@ -358,6 +358,9 @@ public:
 
     void PrepareCascadeShadows(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const FVector &CameraForward, float CameraNear, float CameraFar,bool bOrthographic, EViewMode ViewMode);
 
+    const FSpotLight GetSpotLightData(uint32 SpotIndex) const { return LightData.SpotLights[SpotIndex]; }
+    const FPointLight GetPointLightData(uint32 SpotIndex) const { return LightData.PointLights[SpotIndex]; }
+
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
 	FRenderQueue RenderPackets;
