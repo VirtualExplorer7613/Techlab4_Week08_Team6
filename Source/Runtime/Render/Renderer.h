@@ -60,7 +60,7 @@ struct alignas(16) FPointLight
 	FVector4 ColorIntensity = FVector4(0, 0, 0, 0); // rgb: 색상, w: 강도
 	FVector4 FalloffEnabled = FVector4(1, 0, 0, 0); // x: 반경 감쇠, y: 사용 여부, zw: 패딩
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
+	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius, w : 패딩
     FMatrix ViewProjection[6];
     FVector4 AtlasScaleOffset[6]; // xy : scale, zw : offset
 };
@@ -75,7 +75,7 @@ struct alignas(16) FSpotLight
 	FVector4 ForwardVector = FVector4(1, 0, 0, 0);		// xyz : 전방벡터
     FMatrix ViewProjection;                            // ViewProjection 행렬. 그림자 맵을 만들 때 사용
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
+	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius , w : 패딩
     FVector4 AtlasScaleOffset; // xy : scale, zw : offset
 };
 static_assert(sizeof(FSpotLight) == 192, "FSpotLight must be 192 bytes");
@@ -91,7 +91,7 @@ struct alignas(16) FDirectionalLight
 	FVector4 Direction;		 // xyz : 광선 방향(World)
 	FMatrix ViewProjection;	 // ViewProjection 행렬. 그림자 맵을 만들 때 사용
 	FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
+    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : tan(LightSourceAngle / 2), w : 패딩
 };
 
 static_assert(sizeof(FDirectionalLight) == 128, "FDirectionalLight must be 128 bytes");
@@ -117,8 +117,9 @@ struct alignas(16) FLightGlobalConstants
 	uint32 SpotLightCount = 0;
     uint32 bShowShadows = 1;
     uint32 ShadowQuality = 0;
+    uint32 PCSSMaxKernel = 16;
 };
-static_assert(sizeof(FLightGlobalConstants) == 160, "FLightGlobalConstants must match UberLit LightConstants");
+static_assert(sizeof(FLightGlobalConstants) == 176, "FLightGlobalConstants must match UberLit LightConstants");
 
 struct alignas(16) FCascadeDebugConstants
 {
@@ -199,6 +200,7 @@ public:
 
 	void SetLight(const FLightConstants& LightData);
     void SetShadowQuality(const uint32 &InShadowQuality){ ShadowQuality = InShadowQuality; }
+    void SetPCSSMaxKernel(const uint32& InPCSSMaxKernel) { PCSSMaxKernel = InPCSSMaxKernel; }
     float GetTransitionFactor(){ return TransitionFactor; }
     void SetTransitionFactor(const float&InTransitionFactor){ TransitionFactor = InTransitionFactor; }
 
@@ -411,6 +413,7 @@ private:
 
     uint32  ShadowQuality = 0;
     float TransitionFactor = 2;
+    uint32  PCSSMaxKernel = 16;
 
 	//CS, PS가 읽는 동적 StructuredBuffer
 	ComPtr<ID3D11Buffer> PointLightBuffer;

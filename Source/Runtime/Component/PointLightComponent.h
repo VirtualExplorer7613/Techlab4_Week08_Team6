@@ -9,6 +9,7 @@ class UPointLightComponent : public ULightComponent
 	REFLECT_START(ClassName)
 		PROPERTY(AttenuationRadius)
 		PROPERTY(LightFalloffExponent)
+		PROPERTY(LightSourceRadius)
 	REFLECT_END()
 
 public:
@@ -22,9 +23,13 @@ public:
 	float GeLightFalloffExponent() const { return LightFalloffExponent; }
 	void SetLightFalloffExponent(float InFalloff) { LightFalloffExponent = InFalloff; }
 
+	float GetLightSourceRadius() const { return LightSourceRadius; }
+	void SetLightSourceRadius(float InLightSourceRadius) { LightSourceRadius = InLightSourceRadius; }
+
 	void DrawDebug(FLineBatcher* LineBatcher) const;
 
 protected:
 	float AttenuationRadius = 6.5f;
 	float LightFalloffExponent = 3.0f;
+	float LightSourceRadius = 1.0f;
 };

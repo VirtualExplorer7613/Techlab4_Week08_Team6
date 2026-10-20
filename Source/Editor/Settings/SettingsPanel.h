@@ -46,6 +46,7 @@ struct FEditorSettings
 
     uint32  ShadowQuality = 0;
     float   TransitionFactor = 2;
+	int32   PCSSMaxKernel = 32;
 };
 
 

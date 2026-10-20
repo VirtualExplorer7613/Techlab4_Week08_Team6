@@ -1024,6 +1024,7 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
     if (bRenderShadows)
     {
         Renderer->SetShadowQuality(Settings.ShadowQuality);
+		Renderer->SetPCSSMaxKernel(Settings.PCSSMaxKernel);
         Renderer->SetTransitionFactor(Settings.TransitionFactor);
 
         {

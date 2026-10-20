@@ -294,7 +294,7 @@ void FScene::UpdatePointLight(FLightConstants &LightConstants,
   PointData.ShadowFilterParameters = FVector4(
       std::clamp(LightComponent->GetShadowSharpen(), 0.0f, 1.0f) * 7 + 1,
       1 / Size,
-      0,
+      LightComponent->GetLightSourceRadius(),
       0
   );
 
@@ -366,7 +366,7 @@ void FScene::UpdateSpotLight(FLightConstants &LightConstants,
   SpotData.ShadowFilterParameters = FVector4(
       std::clamp(LightComponent->GetShadowSharpen(), 0.0f, 1.0f) * 7 + 1,
       1 / Size,
-      0,
+      LightComponent->GetLightSourceRadius(),
       0
   );
 
@@ -448,7 +448,7 @@ void FScene::UpdateDirectionalLight(
   DirectionalData.ShadowFilterParameters = FVector4(
       std::clamp(LightComponent->GetShadowSharpen(), 0.0f, 1.0f) * 7 + 1,
       1 / Size,
-      0,
+      tanf(FMath::DegreesToRadians(std::clamp(LightComponent->GetLightSourceAngle(), 0.0f, 89.0f)) * 0.5f),
       0
   );
 

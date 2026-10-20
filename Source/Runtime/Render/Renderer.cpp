@@ -1228,6 +1228,7 @@ void FRenderer::UploadLightGlobalConstants(const FMatrix &DirectionalLightVP)
     Globals.SpotLightCount = LightData.SpotLightCount;
     Globals.bShowShadows = bShadowsEnabled ? 1u : 0u;
     Globals.ShadowQuality = ShadowQuality;
+    Globals.PCSSMaxKernel = PCSSMaxKernel;
 
     RenderCommand::UpdateBufferData(LightCB.get(), &Globals, sizeof(FLightGlobalConstants));
 }
