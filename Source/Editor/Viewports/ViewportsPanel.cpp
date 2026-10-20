@@ -11,6 +11,7 @@
 #include <format>
 
 #include "Core/Stats/EditorStats.h"
+#include "Core/Stats/ShadowStats.h"
 
 namespace
 {
@@ -423,6 +424,26 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 			ProfileLines.Add(Line);
 		}
 	}
+
+    if (FStatOverlay::IsEnabled(EStatFlags::Shadow))
+    {
+        ProfileLines.Add({"Shadow CPU (ms)", TitleColor, {"Last", "Avg", "Max"}});
+
+        const auto AddShadowStat = [&ProfileLines](const char *Label, TStatId StatId) {
+            const FCycleStatData *Data = FStatRegistry::Find(StatId);
+
+            FProfileStatLine Line{"  " + FString(Label), ValueColor};
+            Line.Values[0] = std::format("{:.2f}", Data ? Data->GetLastMs() : 0.0);
+            Line.Values[1] = std::format("{:.2f}", Data ? Data->GetRecentAverageMs() : 0.0);
+            Line.Values[2] = std::format("{:.2f}", Data ? Data->GetMaxMs() : 0.0);
+
+            ProfileLines.Add(Line);
+        };
+
+        AddShadowStat("Directional", ShadowStats::STAT_ShadowDirectional);
+        AddShadowStat("Atlas", ShadowStats::STAT_ShadowAtlas);
+        AddShadowStat("CSM", ShadowStats::STAT_ShadowCSM);
+    }
 
 	if (const FCycleStatData* PickingData = FStatRegistry::Find(EditorStats::STAT_PickingTime))
 	{

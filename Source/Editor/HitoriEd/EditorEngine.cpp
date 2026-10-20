@@ -45,6 +45,7 @@ namespace
 	DECLARE_CYCLE_STAT("ImGui", STAT_ImGui);
 }
 
+#include "Core/Stats/ShadowStats.h"
 #include "Core/SplashScreen.h"
 #include <GameFramework/Actor/PointLight.h>
 
@@ -1005,7 +1006,6 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 {
 	const FEditorSettings& Settings = SettingsPanel->GetSettings();
 	const EViewMode ViewMode = MultipleViewportsAdapter.GetViewMode(ViewIndex);
-    const bool bRenderShadows = ViewMode != EViewMode::Unlit && MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Shadows);
 
 	// Light Culling 뷰 모드는 컬링 결과를 보여주는 모드라 설정과 상관없이 컬링을 돌린다.
 	const bool bLightCullingView = ViewMode == EViewMode::LightCulling;
@@ -1016,27 +1016,36 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	if (MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Primitives))
 		Renderer->RenderQueueSorting(RenderQueue, ViewProjection, ViewCameraLocation);
     
-
     const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
 
+    const bool bRenderShadows = ViewMode != EViewMode::Unlit && MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Shadows);
     Renderer->SetShadowsEnabled(bRenderShadows);
 
     if (bRenderShadows)
     {
-		Renderer->SetShadowQuality(Settings.ShadowQuality);
-		Renderer->SetTransitionFactor(Settings.TransitionFactor);
-        Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
-        //Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
-        //Renderer->RenderPointShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
-    	Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+        Renderer->SetShadowQuality(Settings.ShadowQuality);
+        Renderer->SetTransitionFactor(Settings.TransitionFactor);
 
-    	Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+        {
+            SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowDirectional);
+            Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+        }
 
-		if (ViewIndex == MultipleViewportsAdapter.GetEditorViewIndex())
-		{
-			Renderer->CaptureCascadePreview();
-		}
-	}
+        {
+            SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowAtlas);
+            Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+        }
+
+        {
+            SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowCSM);
+            Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+        }
+
+        if (ViewIndex == MultipleViewportsAdapter.GetEditorViewIndex())
+        {
+            Renderer->CaptureCascadePreview();
+        }
+    }
 
 	if (bPrepass)
 	{
@@ -1051,7 +1060,6 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 
 	// 1. 불투명 Pass
 	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, bPrepass, bTileCulled);
-	
 
 	if (SettingsPanel->GetSettings().bDepthView)
 	{
