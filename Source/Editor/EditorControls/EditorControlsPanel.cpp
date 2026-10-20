@@ -305,7 +305,9 @@ void FEditorControlsPanel::DrawCameraProperties()
 		ImGui::TableSetColumnIndex(1);
 		float Far = ViewportAdapter ? Camera.Projection.FarClip : CamCom->GetFarZ();
 		ImGui::SetNextItemWidth(-1.0f);
+		constexpr float MaxFar = 10000.0f;
 		Changed |= ImGui::InputFloat("##Far", &Far);
+		Far = std::min(Far, MaxFar);
 
 		if (Changed && std::isfinite(Near) && std::isfinite(Far) && Near > 0 && Far > Near)
 		{
