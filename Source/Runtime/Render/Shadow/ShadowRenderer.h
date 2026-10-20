@@ -16,7 +16,7 @@
 #define SHADOW_LOD_LEVEL_1 1024
 #define SHADOW_LOD_LEVEL_2 512
 #define SHADOW_LOD_LEVEL_3 256
-#define SHADOW_ATLAS_BORDER 5
+#define SHADOW_ATLAS_BORDER 5 // UberLit.hlsl이랑 맞춰야됨
 
 struct FShadowPassDesc
 {

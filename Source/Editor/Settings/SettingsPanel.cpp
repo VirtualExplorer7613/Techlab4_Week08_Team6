@@ -45,7 +45,7 @@ void FSettingsPanel::OnRender()
 	ImGui::Checkbox("Depth View", &Settings.bDepthView);
 	ImGui::Checkbox("Tile-Based Light Culling", &Settings.bTileBasedLightCulling);
 
-    static const char *QualityLabels[] = {"Low", "Medium", "High", "Epic", "PCSS", "Box 3x3"};
+    static const char *QualityLabels[] = {"Low", "Medium", "High", "Epic", "PCSS"};
     // UberLut.hlsl SHADOW_QUALITY랑 동일하게
 
     int Quality = static_cast<int>(Settings.ShadowQuality);

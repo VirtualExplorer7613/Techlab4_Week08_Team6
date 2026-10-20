@@ -1536,7 +1536,7 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
         }
 
         const float Far = LightData.PointLights[i].PositionRadius.W;
-        const float Near = 0.1f;
+        const float Near = LightData.PointLights[i].ShadowFilterParameters.W;
 
         for (uint32 face = 0; face < 6; face++)
         {

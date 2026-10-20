@@ -13,7 +13,7 @@ class UPointLightComponent : public ULightComponent
 	REFLECT_END()
 
 public:
-	UPointLightComponent() = default;
+	UPointLightComponent();
 	virtual ~UPointLightComponent() override;
 	virtual void InitializeComponent() override;
 
@@ -31,5 +31,5 @@ public:
 protected:
 	float AttenuationRadius = 6.5f;
 	float LightFalloffExponent = 3.0f;
-	float LightSourceRadius = 1.0f;
+	float LightSourceRadius = 0.05f;
 };

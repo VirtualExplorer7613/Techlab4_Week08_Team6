@@ -295,7 +295,7 @@ void FScene::UpdatePointLight(FLightConstants &LightConstants,
       std::clamp(LightComponent->GetShadowSharpen(), 0.0f, 1.0f) * 7 + 1,
       1 / Size,
       LightComponent->GetLightSourceRadius(),
-      0
+      LightComponent->GetNearPlane()
   );
 
   LightConstants.PointLights[LightConstants.PointLightCount] = PointData;
@@ -367,7 +367,7 @@ void FScene::UpdateSpotLight(FLightConstants &LightConstants,
       std::clamp(LightComponent->GetShadowSharpen(), 0.0f, 1.0f) * 7 + 1,
       1 / Size,
       LightComponent->GetLightSourceRadius(),
-      0
+      LightComponent->GetNearPlane()
   );
 
   LightConstants.SpotLights[LightConstants.SpotLightCount] = SpotData;

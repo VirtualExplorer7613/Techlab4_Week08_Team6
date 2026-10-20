@@ -22,7 +22,7 @@ struct FPointLightInfo
     float4 ColorIntensity;
     float4 FalloffEnabled;
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-	float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
+	float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius, w : nearPlane
     matrix ViewProjection[6];
     float4 AtlasScaleOffset[6];
 };
@@ -36,7 +36,7 @@ struct FSpotLightInfo
     float4 FowardVector;
     matrix ViewProjection;
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionSize, zw : 패딩
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius, w : nearPlane
     float4 AtlasScaleOffset;
 };
 

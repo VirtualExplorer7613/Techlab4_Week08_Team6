@@ -60,7 +60,7 @@ struct alignas(16) FPointLight
 	FVector4 ColorIntensity = FVector4(0, 0, 0, 0); // rgb: 색상, w: 강도
 	FVector4 FalloffEnabled = FVector4(1, 0, 0, 0); // x: 반경 감쇠, y: 사용 여부, zw: 패딩
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius, w : 패딩
+	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius, w : nearPlane
     FMatrix ViewProjection[6];
     FVector4 AtlasScaleOffset[6]; // xy : scale, zw : offset
 };
@@ -75,7 +75,7 @@ struct alignas(16) FSpotLight
 	FVector4 ForwardVector = FVector4(1, 0, 0, 0);		// xyz : 전방벡터
     FMatrix ViewProjection;                            // ViewProjection 행렬. 그림자 맵을 만들 때 사용
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius , w : 패딩
+	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius , w : nearPlane
     FVector4 AtlasScaleOffset; // xy : scale, zw : offset
 };
 static_assert(sizeof(FSpotLight) == 192, "FSpotLight must be 192 bytes");

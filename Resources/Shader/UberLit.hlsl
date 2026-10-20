@@ -15,12 +15,14 @@ static const float3 Ks = float3(0.04f, 0.04f, 0.04f);
 static const int PCSSBlockerSamples = 16;
 static const int PCSSFilterSamples = 32;
 
+#define SHADOW_ATLAS_BORDER         5 // ShadowRenderer.h 랑 맞춰야됨
+
 #define SHADOW_QUALITY_LOW          0
 #define SHADOW_QUALITY_MEDIUM       1
 #define SHADOW_QUALITY_HIGH         2
 #define SHADOW_QUALITY_EPIC         3
 #define SHADOW_QUALITY_PCSS         4
-#define SHADOW_QUALITY_BOX3X3       5
+
 
 cbuffer Viewconstants : register(b0)
 {
@@ -55,7 +57,7 @@ struct FPointLightInfo
     float4 ColorIntensity;
     float4 FalloffEnabled;
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius , w : 패딩
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius , w : nearPlane
     matrix ViewProjection[6];
     float4 AtlasScaleOffset[6]; // xy : scale, zw : offset
 };
@@ -69,7 +71,7 @@ struct FSpotLightInfo
     float4 FowardVector;
     matrix ViewProjection;    
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius , w : 패딩
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, z : LightSourceRadius , w : nearPlane
     float4 AtlasScaleOffset; // xy : scale, zw : offset
 };
 
@@ -197,109 +199,7 @@ FLightResult BlinnPhong(float3 N, float3 L, float3 V, float3 Radiance)
     return Result;
 }
 
-float2 VogelDiskSample(int index, int count, float rotation)
-{
-    float r = sqrt((index + 0.5) / count);
-    float theta = index * radians(137.50776f) + rotation; // 137.50776f = 황금각 (무리수)
 
-    float s, c;
-    sincos(theta, s, c);
-    return (float2(c, s) * r); // 각도와 반지름을 실제 좌표로 변환해서 반환
-}
-
-float LinearizeShadowDepth(float depth, float nearZ, float farZ)
-{
-    return -((nearZ * farZ) / (depth * (farZ - nearZ) - farZ));
-}
-
-float2 ClampToShadowTile(float2 uv, float4 tileScaleOffset, float invMapSize)
-{
-    float halfTexel = invMapSize * 0.5f;
-
-    return clamp(uv, tileScaleOffset.zw + halfTexel, tileScaleOffset.zw + tileScaleOffset.xy - halfTexel);
-}
-
-bool BlockerSearch(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float searchTexel, float4 AtlasScaleOffset, out float blockerCount, out float avgBlockerDepth)
-{
-    blockerCount = 0;
-    avgBlockerDepth = 0;
-
-    float receiverDepth = shadowPos.z - bias;
-
-    [unroll] // 루프를 펼쳐 Vogel 샘플 좌표를 컴파일 타임 상수로 계산
-    for (int cycle = 0; cycle < PCSSBlockerSamples; cycle++)
-    {
-        float2 offsetTexel = VogelDiskSample(cycle, PCSSBlockerSamples, 0) * searchTexel;
-
-        float2 sampleUV = shadowPos.xy + offsetTexel * invMapSize;
-        sampleUV = ClampToShadowTile(sampleUV, AtlasScaleOffset, invMapSize);
-
-        float depth = ShadowMap.SampleLevel(g_SamplePointBorder, sampleUV, 0);
-
-        if (depth < receiverDepth)
-        {
-            avgBlockerDepth += depth;
-            blockerCount += 1;
-        }
-    }
-
-    if (blockerCount > 0)
-    {
-        avgBlockerDepth /= blockerCount;
-    }
-
-    return (blockerCount > 0);
-}
-
-float PenumbraEstimation(float avgBlockerDepth, float ShadowPosDepth, float PenumbraScale)
-{
-    float Length = ShadowPosDepth - avgBlockerDepth;
-
-    float PenumbraTexel = Length * PenumbraScale;
-    PenumbraTexel = clamp(PenumbraTexel, 1, PCSSMaxKernel);
-    return PenumbraTexel;
-}
-
-float PCSSPCF(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float4 AtlasScaleOffset, float PenumbraTexel, float TransitionScale)
-{
-    float Result = 0;
-    [unroll]
-    for (int cycle = 0; cycle < PCSSFilterSamples; cycle++)
-    {
-        float2 offsetTexel = VogelDiskSample(cycle, PCSSFilterSamples, 0) * PenumbraTexel;
-
-        float2 sampleUV = shadowPos.xy + offsetTexel * invMapSize;
-        sampleUV = ClampToShadowTile(sampleUV, AtlasScaleOffset, invMapSize);
-
-        float depth = ShadowMap.SampleLevel(g_SamplePointBorder, sampleUV, 0);
-        Result += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
-    }
-    return Result / PCSSFilterSamples;
-}
-
-float PCSS(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float TransitionScale, float4 AtlasScaleOffset, float PenumbraScale)
-{
-    float avgBlockerDepth, blockerCount;
-    float searchTexel = PCSSMaxKernel; //clamp(1.0f ,1.0f , PCSSMaxKernel); 나중에 이론적인 값으로 변경 일반적일때는 PCSSMaxKernel으로 Clamp 됨
-    // 1. Blocker Search
-    if (!BlockerSearch(ShadowMap, shadowPos, bias, invMapSize, searchTexel, AtlasScaleOffset, blockerCount, avgBlockerDepth))
-    {
-        return (1.0f);
-    }
-
-    if (blockerCount == PCSSBlockerSamples)
-    {
-        return (0.0f);
-    }
-
-    // 2. Penumbra Estimation
-
-    float PenumbraTexel = PenumbraEstimation(avgBlockerDepth, shadowPos.z, PenumbraScale);
-    
-    // 3. PCF
-    
-    return PCSSPCF(ShadowMap, shadowPos, bias, invMapSize, AtlasScaleOffset, PenumbraTexel, TransitionScale);
-}
 
 float Gather1X1(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
 {   
@@ -387,8 +287,134 @@ float Gather5X5(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float 
     return visibility /= 25.0f;
 }
 
+float2 VogelDiskSample(int index, int count, float rotation)
+{
+    float r = sqrt((index + 0.5) / count);
+    float theta = index * radians(137.50776f) + rotation; // 137.50776f = 황금각 (무리수)
 
-float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize, float TransitionScale, float4 AtlasScaleOffset, float PenumbraScale)
+    float s, c;
+    sincos(theta, s, c);
+    return (float2(c, s) * r); // 각도와 반지름을 실제 좌표로 변환해서 반환
+}
+
+float LinearizeShadowDepth(float depth, float nearZ, float farZ)
+{
+    return -((nearZ * farZ) / (depth * (farZ - nearZ) - farZ));
+}
+
+float2 ClampToShadowTile(float2 uv, float4 tileScaleOffset, float invMapSize)
+{
+    float halfTexel = invMapSize * 0.5f;
+
+    return clamp(uv, tileScaleOffset.zw + halfTexel, tileScaleOffset.zw + tileScaleOffset.xy - halfTexel);
+}
+
+bool BlockerSearch(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float searchTexel, float4 AtlasScaleOffset, out float blockerCount, out float avgBlockerDepth)
+{
+    blockerCount = 0;
+    avgBlockerDepth = 0;
+
+    float receiverDepth = shadowPos.z - bias;
+
+    [unroll] // 루프를 펼쳐 Vogel 샘플 좌표를 컴파일 타임 상수로 계산
+    for (int cycle = 0; cycle < PCSSBlockerSamples; cycle++)
+    {
+        float2 offsetTexel = VogelDiskSample(cycle, PCSSBlockerSamples, 0) * searchTexel;
+
+        float2 sampleUV = shadowPos.xy + offsetTexel * invMapSize;
+        sampleUV = ClampToShadowTile(sampleUV, AtlasScaleOffset, invMapSize);
+
+        float depth = ShadowMap.SampleLevel(g_SamplePointBorder, sampleUV, 0);
+
+        if (depth < receiverDepth)
+        {
+            avgBlockerDepth += depth;
+            blockerCount += 1;
+        }
+    }
+
+    if (blockerCount > 0)
+    {
+        avgBlockerDepth /= blockerCount;
+    }
+
+    return (blockerCount > 0);
+}
+
+// PCSSParams : x : PenumbraScale, y : nearPlane, z : farPlane, w : 원근 투영이면 1 (직교면 0)
+float PenumbraEstimation(float avgBlockerDepth, float ShadowPosDepth, float4 PCSSParams)
+{
+    float PenumbraTexel;
+
+    if (PCSSParams.w == 1.0f)
+    {
+        float receiverDistance = LinearizeShadowDepth(ShadowPosDepth, PCSSParams.y, PCSSParams.z);
+        float blockerDistance = LinearizeShadowDepth(avgBlockerDepth, PCSSParams.y, PCSSParams.z);
+
+        PenumbraTexel = (receiverDistance - blockerDistance) / max(blockerDistance * receiverDistance, 0.0001f) * PCSSParams.x;
+    }
+    else
+    {
+        float Length = ShadowPosDepth - avgBlockerDepth;
+        PenumbraTexel = Length * PCSSParams.x;
+    }
+
+    PenumbraTexel = clamp(PenumbraTexel, 1, PCSSMaxKernel);
+    return PenumbraTexel;
+}
+
+float PCSSPCF(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float4 AtlasScaleOffset, float PenumbraTexel, float TransitionScale)
+{
+    float Result = 0;
+    [unroll]
+    for (int cycle = 0; cycle < PCSSFilterSamples; cycle++)
+    {
+        float2 offsetTexel = VogelDiskSample(cycle, PCSSFilterSamples, 0) * PenumbraTexel;
+
+        float2 sampleUV = shadowPos.xy + offsetTexel * invMapSize;
+        sampleUV = ClampToShadowTile(sampleUV, AtlasScaleOffset, invMapSize);
+
+        float depth = ShadowMap.SampleLevel(g_SamplePointBorder, sampleUV, 0);
+        Result += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
+    }
+    return Result / PCSSFilterSamples;
+}
+
+float PCSS(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float TransitionScale, float4 AtlasScaleOffset, float4 PCSSParams)
+{
+    float avgBlockerDepth, blockerCount;
+    float searchTexel = PCSSMaxKernel; //clamp(1.0f ,1.0f , PCSSMaxKernel); 나중에 이론적인 값으로 변경 일반적일때는 PCSSMaxKernel으로 Clamp 됨
+    // 1. Blocker Search
+    if (!BlockerSearch(ShadowMap, shadowPos, bias, invMapSize, searchTexel, AtlasScaleOffset, blockerCount, avgBlockerDepth))
+    {
+        return (1.0f);
+    }
+
+    if (blockerCount == PCSSBlockerSamples)
+    {
+        return (0.0f);
+    }
+
+    // 2. Penumbra Estimation
+
+    float PenumbraTexel = PenumbraEstimation(avgBlockerDepth, shadowPos.z, PCSSParams);
+    
+    // 3. PCF
+    
+    if (PenumbraTexel < 1.5f)
+    {
+        return Gather3X3(ShadowMap, shadowPos, bias, invMapSize, TransitionScale);
+
+    }
+    else if (PenumbraTexel < 2.5f)
+    {
+        return Gather5X5(ShadowMap, shadowPos, bias, invMapSize, TransitionScale);
+    }
+    
+    return PCSSPCF(ShadowMap, shadowPos, bias, invMapSize, AtlasScaleOffset, PenumbraTexel, TransitionScale);
+}
+
+float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize, float TransitionScale, float4 AtlasScaleOffset, float4 PCSSParams)
 {   
     float visibility = 0.0f;
 
@@ -423,27 +449,13 @@ float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 sha
         
         case SHADOW_QUALITY_PCSS:
         {
-            if (PenumbraScale > 0.0f)
-                visibility = PCSS(ShadowMap, shadowPos, bias, invMapSize, TransitionScale, AtlasScaleOffset, PenumbraScale);
+            if (PCSSParams.x > 0.0f)
+                visibility = PCSS(ShadowMap, shadowPos, bias, invMapSize, TransitionScale, AtlasScaleOffset, PCSSParams);
             else
                 visibility = Gather5X5(ShadowMap, shadowPos, bias, invMapSize, TransitionScale);
             break;
         }
-            
-        case SHADOW_QUALITY_BOX3X3:
-        {
-            for (int x = -1; x <= 1; ++x)
-            {
-                for (int y = -1; y <= 1; ++y)
-                {
-                    float2 offset = float2(x, y) * texelSize;
-                    float depth = ShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy + offset, 0);
-                    visibility += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
-                }
-            }
-            visibility /= 9.0f;
-            break;
-        }
+
         default:
         {
             float depth = ShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy, 0);
@@ -471,7 +483,7 @@ float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint
         return 1.0f;
     }
 
-    float near = 0.1f;
+    float near = PointLights[index].ShadowFilterParameters.w;
     float far = PointLights[index].PositionRadius.w;
     float viewDepth = max(abs(lightToPixel.x), max(abs(lightToPixel.y), abs(lightToPixel.z)));
     float projDepth = far / (far - near) - (near * far) / ((far - near) * viewDepth);
@@ -529,12 +541,13 @@ float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint
     
     float NdotL = saturate(dot(normal, -normalize(lightToPixel).xyz));
     float2 texelSize = float2(PointLights[index].ShadowParameters.z, PointLights[index].ShadowParameters.z);
-
     float bias = PointLights[index].ShadowParameters.x + PointLights[index].ShadowParameters.y * (1.0f - NdotL);
-
-    return ShadowFiltering2D(ShadowMapAtlas, texelSize, shadowPos, bias, invMapSize, TransitionScale, PointLights[index].AtlasScaleOffset[faceIndex], 0.0f);
-    //return ShadowFilteringCube(ShadowMapAtlas, lightToPixel, projDepth, bias, invMapSize);
-
+    float tileTexel = PointLights[index].AtlasScaleOffset[faceIndex].x / PointLights[index].ShadowParameters.z;
+    float tanHalfFov = tileTexel / (tileTexel - 2.0f * SHADOW_ATLAS_BORDER);
+    float penumbraScale = PointLights[index].ShadowFilterParameters.z * tileTexel / (2.0f * tanHalfFov);
+    float4 pcssParams = float4(penumbraScale, PointLights[index].ShadowFilterParameters.w, PointLights[index].PositionRadius.w, 1.0f);
+    
+    return ShadowFiltering2D(ShadowMapAtlas, texelSize, shadowPos, bias, invMapSize, TransitionScale, PointLights[index].AtlasScaleOffset[faceIndex], pcssParams);
 }
 
 FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
@@ -555,7 +568,7 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
     float3 radiance = ColorIntensity.rgb * ColorIntensity.w * falloff * enabled;    
 
     FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
-
+    
     float Shadow = CalculatePointShadow(worldPos, info.PositionRadius.xyz, normal, index, info.ShadowParameters.z, info.ShadowFilterParameters.y);
     
     Shadow = saturate((Shadow - 0.5) * info.ShadowFilterParameters.x + 0.5);
@@ -602,7 +615,13 @@ float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLight
     float NdotL = saturate(dot(normal, lightDir));
     
     float bias = SpotLights[index].ShadowParameters.x + SpotLights[index].ShadowParameters.y * (1.0f - NdotL);
-    return ShadowFiltering2D(ShadowMapAtlas, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y, info.AtlasScaleOffset, 0.0f);
+    float cosOuter = info.OutAngleInvCosDiff.x;
+    float tanHalfFov = sqrt(1.0f - cosOuter * cosOuter) / cosOuter;
+    float tileTexel = info.AtlasScaleOffset.x / info.ShadowParameters.z;
+    float penumbraScale = info.ShadowFilterParameters.z * tileTexel / (2.0f * tanHalfFov);
+    float4 pcssParams = float4(penumbraScale, info.ShadowFilterParameters.w, info.PositionRadius.w, 1.0f);
+
+    return ShadowFiltering2D(ShadowMapAtlas, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y, info.AtlasScaleOffset, pcssParams);
 }
 
 FLightResult CalculateSpotLight(FSpotLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
@@ -826,7 +845,7 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLig
         float texelPerWorld = length(float3(DirectionalLight.LightVP._11, DirectionalLight.LightVP._21, DirectionalLight.LightVP._31)) * 0.5f / invResolution;
         float penumbraScale = depthRange * info.ShadowFilterParameters.z * texelPerWorld;
 
-        visibility = ShadowFiltering2D(DirectionalShadowMap, texelSize, shadowPos, bias, invResolution, info.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), penumbraScale);
+        visibility = ShadowFiltering2D(DirectionalShadowMap, texelSize, shadowPos, bias, invResolution, info.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), float4(penumbraScale, 0.0f, 0.0f, 0.0f));
     }
     
     return visibility;

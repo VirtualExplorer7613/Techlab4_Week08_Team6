@@ -51,8 +51,14 @@ void UPointLightComponent::InitializeComponent()
 }
 
 
+UPointLightComponent::UPointLightComponent()
+{
+	SetNearPlane(0.1f);
+}
+
 UPointLightComponent::~UPointLightComponent()
 {
+
 }
 
 void UPointLightComponent::DrawDebug(FLineBatcher* LineBatcher) const
