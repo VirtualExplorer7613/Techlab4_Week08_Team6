@@ -5,7 +5,7 @@
 #include "Core/EngineStatics.h"
 #include "Core/EngineTimer.h"
 #include "Launch/LaunchEngineLoop.h"
-#include "Core/StatOverlay.h"
+#include "Core/Stats/StatOverlay.h"
 #include "Input/InputSystem.h"
 
 

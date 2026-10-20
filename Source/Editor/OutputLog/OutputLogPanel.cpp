@@ -1,7 +1,7 @@
 #include "EnginePCH.h"
 #include "Editor/OutputLog/OutputLogPanel.h"
 
-#include "Core/StatOverlay.h"
+#include "Core/Stats/StatOverlay.h"
 
 static int TextEditCallbackStub(ImGuiInputTextCallbackData* data)
 {

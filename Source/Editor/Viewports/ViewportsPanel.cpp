@@ -2,7 +2,7 @@
 #include "Editor/Viewports/ViewportsPanel.h"
 #include "Editor/LevelEditor/MultipleViewports/Adapter/MultipleViewportsAdapter.h"
 
-#include "Core/StatOverlay.h"
+#include "Core/Stats/StatOverlay.h"
 #include "Core/Stats/LightweightStats.h"
 #include "Render/RenderCommand.h"
 
