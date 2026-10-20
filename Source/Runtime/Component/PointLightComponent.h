@@ -24,7 +24,17 @@ public:
 
 	void DrawDebug(FLineBatcher* LineBatcher) const;
 
+	FVector4 GetFaceAtlasScaleOffset(uint32 Face) { return AtlasScaleOffset[Face]; }
+	void SetFaceAtlasScaleOffset(uint32 Face, FVector4 InFaceAtlasScaleOffset) { AtlasScaleOffset[Face] = InFaceAtlasScaleOffset; }
+
+	const uint32 GetLightIndex() { return LightIndex; }
+	void SetLightIndex(uint32 InLightIndex) { LightIndex = InLightIndex; }
+
 protected:
 	float AttenuationRadius = 6.5f;
 	float LightFalloffExponent = 3.0f;
+
+	uint32 LightIndex = -1;
+
+	FVector4 AtlasScaleOffset[6] = {};
 };

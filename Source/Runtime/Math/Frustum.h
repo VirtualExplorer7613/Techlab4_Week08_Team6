@@ -16,6 +16,7 @@ enum class EFrustumTest : uint8 { Outside, Intersect, Inside };
 
 // 6개 평면 모두 검사해야 하는 초기 마스크. 비트 i가 켜져 있으면 평면 i를 아직 검사해야 한다.
 inline constexpr uint32 FrustumAllPlanesMask = 0x3F;
+inline constexpr uint32 FrustumSidePlanesMask = 0x0F;
 
 // Min/Max 박스를 변환 없이 바로 판정한다. 박스가 완전히 안쪽에 있는 평면은 마스크에서 지워
 // 자식 노드가 그 평면을 다시 검사하지 않게 한다. 마스크가 0이 되면 Inside다.

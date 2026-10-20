@@ -979,9 +979,28 @@ void DrawShadowTexture(ULightComponent *LightComponent)
     }
 
     FTexture2D *ShadowMapTexture = LightComponent->GetShadowMapTexture();
-    if (ShadowMapTexture && ShadowMapTexture->GetSRV())
+    if (!ShadowMapTexture && !ShadowMapTexture->GetSRV())
     {
-        ImGui::Image(reinterpret_cast<ImTextureID>(ShadowMapTexture->GetSRV()), ImVec2(256, 256));
+        return;
+    }
+
+    if(USpotLightComponent* SpotLightComponent = Cast<USpotLightComponent>(LightComponent))
+    {
+        FVector4 AtlasScaleOffset = SpotLightComponent->GetAtlasScaleOffset();
+        ImVec2 UV0 = ImVec2(AtlasScaleOffset.Z, AtlasScaleOffset.W);
+        ImVec2 UV1 = ImVec2(AtlasScaleOffset.Z + AtlasScaleOffset.X, AtlasScaleOffset.W + AtlasScaleOffset.Y);
+        ImGui::Image(reinterpret_cast<ImTextureID>(ShadowMapTexture->GetSRV()), ImVec2(256.0f, 256.0f),UV0, UV1, ImVec4(1.0f,1.0f,1.0f,1.0f), ImVec4(0.5f, 0.5f,0.5f,1.0f));
+    }
+    else if(UPointLightComponent* PointLightComponent = Cast<UPointLightComponent>(LightComponent))
+    {
+        static int SelectedFace = 0;
+        const char* FaceNames[6] = { "+X", "-X", "+Y", "-Y", "+Z", "-Z"};
+        ImGui::Combo("Cube Face", &SelectedFace, FaceNames, IM_ARRAYSIZE(FaceNames));
+
+        FVector4 AtlasScaleOffset = PointLightComponent->GetFaceAtlasScaleOffset(SelectedFace);
+        ImVec2 UV0 = ImVec2(AtlasScaleOffset.Z, AtlasScaleOffset.W);
+        ImVec2 UV1 = ImVec2(AtlasScaleOffset.Z + AtlasScaleOffset.X, AtlasScaleOffset.W + AtlasScaleOffset.Y);
+        ImGui::Image(reinterpret_cast<ImTextureID>(ShadowMapTexture->GetSRV()), ImVec2(256.0f, 256.0f), UV0, UV1, ImVec4(1.0f, 1.0f, 1.0f, 1.0f), ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
     }
 } 
 

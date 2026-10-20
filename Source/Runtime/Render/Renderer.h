@@ -366,6 +366,9 @@ public:
     void PrepareCascadeShadows(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const FVector &CameraForward, float CameraNear, float CameraFar,bool bOrthographic, EViewMode ViewMode);
     void PrepareCascadeShadows(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const FVector& CameraForward, float CameraNear, float CameraFar, bool bOrthographic, EViewMode ViewMode, const FMatrix& CameraWorld, float TanHalfFovX, float TanHalfFovY);
 
+    const FSpotLight GetSpotLightData(uint32 SpotIndex) const { return LightData.SpotLights[SpotIndex]; }
+    const FPointLight GetPointLightData(uint32 SpotIndex) const { return LightData.PointLights[SpotIndex]; }
+
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
 	FRenderQueue RenderPackets;
@@ -420,6 +423,9 @@ private:
 	ComPtr<ID3D11ShaderResourceView> SpotLightSRV;
 
     TUniquePtr<FShadowRenderer> ShadowRenderer;
+
+    // LightVP와 선택한 Frustum 평면을 기준으로 Shadow Caster 후보를 수집한다.
+    void GatherShadowCasters(const FScene& Scene, const FMatrix& LightVP, uint32 PlaneMask, TArray<FPrimitiveSceneProxy*>& OutCasters) const;
 
     // 카메라 RenderQueue와 독립적으로 Scene의 Shadow Caster를 렌더링한다.
     // Caster 목록이 전달되면 해당 목록을, 없으면 Scene.Proxies를 순회한다.

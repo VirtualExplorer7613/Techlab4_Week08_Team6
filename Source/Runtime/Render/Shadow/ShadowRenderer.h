@@ -28,12 +28,12 @@ struct FShadowPassDesc
 };
 
 const FCubeFaceDirection CubeFaceDirections[6] = {
-    {FVector(1.0f, 0.0f, 0.0f), FVector(0.0f, 1.0f, 0.0f)},  // +X
-    {FVector(-1.0f, 0.0f, 0.0f), FVector(0.0f, 1.0f, 0.0f)}, // -X
-    {FVector(0.0f, 1.0f, 0.0f), FVector(0.0f, 0.0f, -1.0f)}, // +Y
+    {FVector(1.0f, 0.0f, 0.0f), FVector(0.0f, 0.0f, 1.0f)},  // +X
+    {FVector(-1.0f, 0.0f, 0.0f), FVector(0.0f, 0.0f, 1.0f)}, // -X
+    {FVector(0.0f, 1.0f, 0.0f), FVector(0.0f, 0.0f, 1.0f)}, // +Y
     {FVector(0.0f, -1.0f, 0.0f), FVector(0.0f, 0.0f, 1.0f)}, // -Y
-    {FVector(0.0f, 0.0f, 1.0f), FVector(0.0f, 1.0f, 0.0f)},  // +Z
-    {FVector(0.0f, 0.0f, -1.0f), FVector(0.0f, 1.0f, 0.0f)}  // -Z
+    {FVector(0.0f, 0.0f, 1.0f), FVector(-1.0f, 0.0f, 0.0f)},  // +Z
+    {FVector(0.0f, 0.0f, -1.0f), FVector(1.0f, 0.0f, 0.0f)}  // -Z
 };
 
 // For returning result

@@ -41,6 +41,7 @@ public:
 	void MarkRenderStateDirty(FPrimitiveSceneProxy* Proxy);
 
 	void UpdateLightComponents(FRenderer* Renderer);
+	void PostUpdateLightComponents(FRenderer* Renderer);
 	void RegisterLightComponent(ULightComponentBase* LightComponent);
 	void UnRegisterLightComponent(ULightComponentBase* LightComponent);
 
@@ -62,7 +63,7 @@ public:
 	};
 	bool bElementListChanged = false;
 	
-	TArray<ULightComponentBase*> LightComponents;
+	TArray<ULightComponentBase*> LightComponents;	
 
 private:
 	void UpdatePointLight(FLightConstants& LightConstants, UPointLightComponent* LightComponent, float TransitionFactor);
