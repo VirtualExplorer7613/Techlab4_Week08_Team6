@@ -78,7 +78,7 @@ struct alignas(16) FSpotLight
 	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
     FVector4 AtlasScaleOffset; // xy : scale, zw : offset
 };
-static_assert(sizeof(FSpotLight) == 176, "FSpotLight must be 176 bytes");
+static_assert(sizeof(FSpotLight) == 192, "FSpotLight must be 192 bytes");
 
 struct alignas(16) FAmbientLight
 {

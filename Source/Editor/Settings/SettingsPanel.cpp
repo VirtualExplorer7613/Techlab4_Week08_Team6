@@ -44,7 +44,6 @@ void FSettingsPanel::OnRender()
 	ImGui::Checkbox("FXAA", &Settings.bEnableFXAA);
 	ImGui::Checkbox("Depth View", &Settings.bDepthView);
 	ImGui::Checkbox("Tile-Based Light Culling", &Settings.bTileBasedLightCulling);
-	ImGui::Checkbox("Exponential Height Fog", &Settings.bExponentialHeightFog);
 
     static const char *QualityLabels[] = {"Low", "Medium", "High", "Epic", "Box 3x3"};
     // UberLut.hlsl SHADOW_QUALITY랑 동일하게

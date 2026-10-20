@@ -531,8 +531,6 @@ void FRenderer::BindLightResources()
 	Context->PSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 
     RenderCommand::BindShaderResource(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindShaderResource(11, GetSpotShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindShaderResource(12, GetPointShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindShaderResource(14, GetShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindSamplerState(1, ESamplerState::PointBorder, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
     RenderCommand::BindSamplerState(2, ESamplerState::LinearComparison, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
@@ -1265,8 +1263,8 @@ void FRenderer::RenderShadowMap(const FScene &Scene, const FMatrix &CameraViewPr
         return;
     }
 
-    RenderCommand::UnbindShaderResource(11, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // SpotLight Buffer
-    RenderCommand::UnbindShaderResource(12, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // PointLight Buffer
+    RenderCommand::UnbindShaderResource(14, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // ShadowMapAtlasBuffer
+
 
     ShadowRenderer->GetShadowAtlasAllocator().Reset();
 

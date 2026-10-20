@@ -106,7 +106,7 @@ struct FPointLightInfo
     float4 ColorIntensity;
     float4 FalloffEnabled;
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shadow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
     matrix ViewProjection[6];
     float4 AtlasScaleOffset[6]; // xy : scale, zw : offset
 };
@@ -154,10 +154,7 @@ cbuffer LightConstants : register(b3)
 StructuredBuffer<FPointLightInfo> PointLights : register(t8);
 StructuredBuffer<FSpotLightInfo> SpotLights : register(t9);
 
-Texture2D<float> DirectionalShadowMap : register(t10);
-Texture2D<float> SpotShadowMap : register(t11);
 Texture2DArray<float> CascadeShadowMap : register(t13);
-TextureCube<float> PointShadowMap : register(t12);
 Texture2D<float> ShadowMapAtlas : register(t14);
 
 cbuffer TileBasedCullingConstants : register(b4)
@@ -264,7 +261,7 @@ void CalcCubeDiscBasis(float invMapSize, float3 lightToPixel, out float3 outNorm
 
 float SampleCubeShadow(float3 lightToPixel, float projDepth, float bias)
 {
-    return PointShadowMap.SampleCmpLevelZero(g_SampleLinearComparison, lightToPixel, projDepth - bias);
+    return ShadowMapAtlas.SampleCmpLevelZero(g_SampleLinearComparison, lightToPixel, projDepth - bias);
 }
 
 float CubeDiscPCF5(float3 lightToPixel, float projDepth, float bias, float invMapSize)
@@ -314,7 +311,7 @@ float CubeDiscPCF29(float3 lightToPixel, float projDepth, float bias, float invM
     return visibility / 29;
 }
 
-float ShadowFilteringCube(TextureCube<float> ShadowMap, float3 lightToPixel, float projDepth, float bias, float invMapSize)
+float ShadowFilteringCube(Texture2D<float> ShadowMap, float3 lightToPixel, float projDepth, float bias, float invMapSize)
 {
     float visibility = 0.0f;
     
@@ -445,7 +442,7 @@ float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 sha
                 for (int y = -1; y <= 1; ++y)
                 {
                     float2 offset = float2(x, y) * texelSize;
-                    float depth = ShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy + offset, 0);
+                    float depth = ShadowMapAtlas.SampleLevel(g_SamplePointBorder, shadowPos.xy + offset, 0);
                     visibility += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
                 }
             }
@@ -454,7 +451,7 @@ float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 sha
         }
         default:
         {
-            float depth = ShadowMap.SampleLevel(g_SamplePointBorder, shadowPos.xy, 0);
+            float depth = ShadowMapAtlas.SampleLevel(g_SamplePointBorder, shadowPos.xy, 0);
             visibility += saturate((depth - (shadowPos.z - bias)) * TransitionScale + 1);
             break;
         }
@@ -463,7 +460,7 @@ float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 sha
     return visibility;
 }
 
-float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint index, float invMapSize)
+float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint index, float invMapSize, float TransitionScale)
 {
     if (PointLights[index].ShadowParameters.w == 0 || bReceiveShadow == 0)
     {
@@ -533,11 +530,12 @@ float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint
     }
     
     float NdotL = saturate(dot(normal, -normalize(lightToPixel).xyz));
-    float2 texelSize = float2(PointLights[0].ShadowParameters.z, PointLights[0].ShadowParameters.z);
+    float2 texelSize = float2(PointLights[index].ShadowParameters.z, PointLights[index].ShadowParameters.z);
 
     float bias = PointLights[index].ShadowParameters.x + PointLights[index].ShadowParameters.y * (1.0f - NdotL);
-    
-    return ShadowFilteringCube(PointShadowMap, lightToPixel, projDepth, bias, invMapSize);
+
+    return ShadowFiltering2D(ShadowMapAtlas, texelSize, shadowPos, bias, invMapSize, TransitionScale);
+    //return ShadowFilteringCube(ShadowMapAtlas, lightToPixel, projDepth, bias, invMapSize);
 
 }
 
@@ -560,7 +558,7 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
 
     FLightResult Result = BlinnPhong(normal, lightDir, viewDir, radiance);
 
-    float Shadow = CalculatePointShadow(worldPos, info.PositionRadius.xyz, normal, index, info.ShadowParameters.z);
+    float Shadow = CalculatePointShadow(worldPos, info.PositionRadius.xyz, normal, index, info.ShadowParameters.z, info.ShadowFilterParameters.y);
     
     Shadow = saturate((Shadow - 0.5) * info.ShadowFilterParameters.x + 0.5);
 
@@ -603,20 +601,7 @@ float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLight
     float NdotL = saturate(dot(normal, lightDir));
     
     float bias = SpotLights[index].ShadowParameters.x + SpotLights[index].ShadowParameters.y * (1.0f - NdotL);
-    
-    float visibility = 0.0f;
-    for (int x = -1; x <= 1; ++x)
-    {
-        for (int y = -1; y <= 1; ++y)
-        {
-            float2 offset = float2(x, y) * texelSize;
-            float depth = ShadowMapAtlas.SampleLevel(g_SampleShadow, shadowPos.xy + offset, 0);
-            visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
-        }
-    }
-    visibility /= 9.0f;
-    return visibility;
-    return ShadowFiltering2D(SpotShadowMap, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
+    return ShadowFiltering2D(ShadowMapAtlas, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
 }
 
 FLightResult CalculateSpotLight(FSpotLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
@@ -751,7 +736,7 @@ float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentV
             // 텍셀 단위 이동을 UV 단위로 변환
             float2 offset = float2(x, y) * texelSize;
 
-            float depth = CascadeShadowMap.SampleLevel(g_SampleShadow, float3(nextPos.xy + offset, (float) nextIndex), 0);
+            float depth = CascadeShadowMap.SampleLevel(g_SamplePointBorder, float3(nextPos.xy + offset, (float) nextIndex), 0);
 
             nextVisibility += (nextPos.z - bias) <= depth ? 1.0f : 0.0f;
         }
@@ -780,7 +765,6 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLig
         shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
     }
     
-    // float4 shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
     shadowPos.xyz /= shadowPos.w; // W divde
     shadowPos.x = shadowPos.x * 0.5f + 0.5f;
     shadowPos.y = -shadowPos.y * 0.5f + 0.5f;
@@ -797,9 +781,6 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLig
     }
 
     float invResolution = useCascade ? CascadeInvResolution : DirectionalLight.ShadowParameters.z;
-    //float invResolution = DirectionalLight.ShadowParameters.z;
-
-    //float2 texelSize = float2(DirectionalLight.ShadowParameters.z, DirectionalLight.ShadowParameters.z);
 
     float2 texelSize = float2(invResolution, invResolution);
     
@@ -808,32 +789,38 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLig
     float bias = DirectionalLight.ShadowParameters.x + DirectionalLight.ShadowParameters.y * (1.0f - NdotL);
     
     float visibility = 0.0f;
-    for (int x = -1; x <= 1; ++x)
-    {
-        for (int y = -1; y <= 1; ++y)
-        {
-            float2 offset = float2(x, y) * texelSize;
-            float depth;
-            if (useCascade)
-            {
-                depth = CascadeShadowMap.SampleLevel(g_SampleShadow, float3(shadowPos.xy + offset, (float) cascadeIndex), 0);
-            }
-            else
-            {
-                depth = DirectionalShadowMap.SampleLevel(g_SampleShadow, shadowPos.xy + offset, 0);
-            }
-            visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
-        }
-    }
-    visibility /= 9.0f;
+    
 
     if (useCascade)
+    {// todo 나중에 변경 shadow atlas
+        //visibility = ShadowFiltering2D(CascadeShadowMap, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
+        //visibility = ApplyCascadeShadowBlend(worldPos, cascadeIndex, visibility, bias);
+
+        for (int x = -1; x <= 1; ++x)
+        {
+            for (int y = -1; y <= 1; ++y)
+            {
+                float2 offset = float2(x, y) * texelSize;
+                float depth;
+                if (useCascade)
+                {
+                    depth = CascadeShadowMap.SampleLevel(g_SamplePointBorder, float3(shadowPos.xy + offset, (float) cascadeIndex), 0);
+                }
+                else
+                {
+                    depth = ShadowMapAtlas.SampleLevel(g_SamplePointBorder, shadowPos.xy + offset, 0);
+                }
+                visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
+            }
+        }
+        
+    }
+    else
     {
-        visibility = ApplyCascadeShadowBlend(worldPos, cascadeIndex, visibility, bias);
+        visibility = ShadowFiltering2D(ShadowMapAtlas, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
     }
     
     return visibility;
-    return ShadowFiltering2D(DirectionalShadowMap, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
 }
 
 FLightResult CalculateDirectionalLight(FDirectionalLightInfo info, float3 normal, float3 viewDir, float3 worldPos)
@@ -937,7 +924,7 @@ float3 ApplyCascadeDebugColor(float3 shadedColor, float3 worldPos, float3 normal
     if (NdotL <= 0.0f)
         return shadedColor;
     
-    float visibility = CalculateDirectionalShadow(worldPos, normal);
+    float visibility = CalculateDirectionalShadow(worldPos, normal, DirectionalLight);
     float shadowAmount = saturate(1.0f - visibility);
 
     uint cascadeIndex = SelectDebugCascade(worldPos);
@@ -1080,7 +1067,7 @@ float4 mainPS(PS_INPUT input) : SV_TARGET
     
 #if LIGHTING_MODEL_PHONG
     finalRGB =  finalRGB * (ambient + Light.Diffuse) + Light.Specular;
- #else
+#else
     finalRGB = finalRGB * (ambient + Light.Diffuse);
 #endif
     finalRGB = ACESFilmicToneMapping(finalRGB);
