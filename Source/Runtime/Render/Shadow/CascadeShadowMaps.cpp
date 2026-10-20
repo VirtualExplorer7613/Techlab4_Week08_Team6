@@ -92,3 +92,18 @@ bool FCascadeShadowMaps::Init(uint32 InResolution, uint32 InCascadeCount)
 
     return true;
 }
+
+bool FCascadeShadowMaps::CopyFrom(const FCascadeShadowMaps &Source)
+{
+    ID3D11DeviceContext *Context = RenderCommand::GetContext();
+
+    if (!Context || this == &Source || Texture.Get() == nullptr || Source.Texture.Get() == nullptr ||
+        Resolution != Source.Resolution || CascadeCount != Source.CascadeCount)
+    {
+
+        return false;
+    }
+
+    Context->CopyResource(Texture.Get(), Source.Texture.Get());
+    return true;
+}
