@@ -248,7 +248,7 @@ void FRenderer::RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &C
     RenderCommand::UpdateBufferData(ViewCB.get(), &CameraConstants, sizeof(FViewConstants));
 }
 
-void FRenderer::PrepareCascadeShadows(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic, EViewMode ViewMode)
+/*void FRenderer::PrepareCascadeShadows(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic, EViewMode ViewMode)
 {
     // CSM 비활성·직교 여부와 관계없이 설정 요청을 먼저 처리한다.
     // 실패하면 기존 리소스를 유지하고 아래 계산을 계속한다.
@@ -257,6 +257,15 @@ void FRenderer::PrepareCascadeShadows(const FScene &Scene, const FMatrix &Camera
     UpdateCascadeDebugConstants(Scene, CameraViewProjection, CameraForward, CameraNear, CameraFar, bOrthographic);
 
     RenderCascadeShadowPreview(Scene, CameraViewProjection, CameraLocation, ViewMode);
+}*/
+
+void FRenderer::PrepareCascadeShadows(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const FVector& CameraForward, float CameraNear, float CameraFar, bool bOrthographic, EViewMode ViewMode, const FMatrix& CameraWorld, float TanHalfFovX, float TanHalfFovY)
+{
+    ApplyPendingCSMSettings();
+    UpdateCascadeDebugConstants(Scene, CameraWorld, CameraForward, CameraNear, CameraFar, bOrthographic, TanHalfFovX, TanHalfFovY);
+
+    RenderCascadeShadowPreview(Scene, CameraViewProjection, CameraLocation, ViewMode);
+
 }
 
 bool FRenderer::InitCascadePreviewResources()
@@ -295,12 +304,7 @@ bool FRenderer::InitCascadePreviewResources()
     return true;
 }
 
-void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,
-                                            const FMatrix &CameraViewProjection,
-                                            const FVector &CameraForward,
-                                            float CameraNear,
-                                            float CameraFar,
-                                            bool bOrthographic)
+/*void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection,  const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic)
 {
     CascadeConstants = {};
 
@@ -518,6 +522,253 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,
             }
 
             CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution, MinCasterDepth);
+
+            SplitNear = SplitFar;
+            Weight *= DistributionExponent;
+
+            CascadeConstants.CSMEnabled = 1u;
+        }
+    }
+    RenderCommand::UpdateBufferData(CascadeDebugCB.get(), &CascadeConstants, sizeof(CascadeConstants));
+}*/
+
+void FRenderer::UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& CameraWorld, const FVector& CameraForward, float CameraNear, float CameraFar, bool bOrthographic, float TanHalfFovX, float TanHalfFovY)
+{
+    CascadeConstants = {};
+
+    for (auto& Casters : CascadeShadowCasters)
+    {
+        Casters.Reset();
+    }
+
+    CascadeConstants.BlendEnabled = bCascadeBlendEnabled ? 1u : 0u;
+
+    const FVector Forward = CameraForward.Normalized();
+    CascadeConstants.CameraForward = FVector4(Forward.X, Forward.Y, Forward.Z, 0.0f);
+
+    CascadeConstants.DebugColorsEnabled = bCascadeDebugColors ? 1u : 0u;
+
+    const uint32 Count = std::min(CascadeShadowMaps.GetCascadeCount(), 4u);
+
+    const uint32 Resolution = CascadeShadowMaps.GetResolution();
+    const float EndDepth = std::min(CameraFar, CSMShadowDistance);
+
+    const bool bCanUseCSM = {
+        bCSMEnabled &&
+        !bOrthographic && // Perspective 뷰에서만 CSM을 적용
+        ShadowRenderer &&
+        CascadeShadowMaps.GetArraySRV() &&
+        LightData.DirectionalLight.ShadowParameters.W > 0.0f &&
+        Count > 0 && Resolution > 0 &&
+        CameraNear > 0.0f &&
+        CameraFar > CameraNear && EndDepth > CameraNear
+    };
+
+    if (bCanUseCSM)
+    {
+        CascadeConstants.CascadeCount = Count;
+        CascadeConstants.ShadowDistance = EndDepth;
+        CascadeConstants.InvResolution = 1.0f / static_cast<float>(Resolution);
+
+        CascadeConstants.SplitDepths = FVector4(EndDepth);
+        CascadeConstants.BlendEndDepths = FVector4(EndDepth);
+
+        const FVector4& Direction = LightData.DirectionalLight.Direction;
+        const FVector LightDirection(Direction.X, Direction.Y, Direction.Z);
+        //const auto CameraCorners = GetFrustumCornersWorld(CameraViewProjection);
+
+        // 기본 분할 정책 E = 3;
+        //constexpr float DistributionExponent = 3.0f;
+        // 
+
+        const float DistributionExponent = CSMDistributionExponent;
+
+        float TotalWeight = 0.0f;
+        float Weight = 1.0f;
+
+        // Count개의 캐스케이드에 필요한 가중치 합을 계산
+        for (uint32 Index = 0; Index < Count; ++Index)
+        {
+            TotalWeight += Weight;
+            Weight *= DistributionExponent;
+        }
+
+        const float BaseLength = (EndDepth - CameraNear) / TotalWeight;
+
+        float SplitNear = CameraNear;
+        Weight = 1.0f;
+
+        // 캐스케이드마다 하나씩 LightVP를 만든다.
+        // Count가 4라면 Index는 0, 1, 2, 3.
+
+        for (uint32 Index = 0; Index < Count; ++Index)
+        {
+            // ──────────────────────
+            // 이번 Cascade가 담당할 카메라 깊이 구간 결정
+            // ──────────────────────
+            // SplitNear: 이번 구간의 시작 깊이
+            // SplitFar : 이번 구간의 끝 깊이.
+            //
+            //
+            // 첫 Cascade의 SplitNear는 CameraNear에서 시작한다.
+            // 이후에는 이전 Cascade SplitFar를 이어받는다.
+            //
+            // BaseLength * Weight가 이번 구간의 길이다.
+            // Weight가 1 -> 3 -> 9 -> 27로 증가하므로,
+            // 멀리 있는 Cascade면 더 넓은 깊이 구간을 담당한다.
+            //
+            // 마지막 Cascade는 끝을 EndDepth로 명시한다.
+
+            const float SplitFar = Index == Count - 1 ? EndDepth : SplitNear + BaseLength * Weight;
+
+            // 이번 Cascade의 기본 경계와 다음 Cascade로 전환할 구간을 계산한다.
+            //
+            // SplitDepths[Index]    : 확장 전 끝 깊이. 다음 Cascade와의 보간 시작점.
+            // BlendEndDepths[Index] : 확장된 끝 깊이. 다음 Cascade와의 보간 종료점.
+            //
+            // 예:
+            // 기본 범위가 0~100이고 전환 비율이 10% 라면
+            // 현재 맵은 0~110까지 렌더링하고, 100~110에서 다음 맵의 결과와 보간한다.
+            // 
+            // 현재 Cascade 깊이 구간의 10%를 다음 캐스케이드와의 전환 길이로 사용한다.
+            constexpr float BlendFraction = 0.1f;
+
+            // 다음 Cascade 있으면 전환 길이를 계산한다.
+            // 마지막 Cascade는 다음 맵과 보간하지 않으므로 0으로 설정한다.
+            const float FadeLength = Index + 1 < Count ? (SplitFar - SplitNear) * BlendFraction : 0.0f;
+
+            // 렌더링 시작 깊이는 원래 구간의 시작을 유지한다.
+            const float RenderNear = SplitNear;
+
+            // 끝 깊이를 전환 길이만큼 확장하여 다음 캐스케이드와 겹치는 구간을 만든다.
+            // 전체 그림자 거리인 EndDepth를 넘지 않도록 제한한다.
+            const float RenderFar = std::min(SplitFar + FadeLength, EndDepth);
+
+            // 원래 끝 깊이를 보간 시작점으로 저장한다.
+            CascadeConstants.SplitDepths[Index] = SplitFar;
+
+            // 확장된 끝 깊이를 보간 종료점으로 저장한다.
+            // 셰이더는 SplitDepths[Index] ~ BlendEndDepths[Index] 구간에서
+            // 현재 맵과 다음 맵의 결과를 섞는다.
+            CascadeConstants.BlendEndDepths[Index] = RenderFar;
+
+
+            // ───────────────────────
+            // 이번 깊이 구간을 전체 카메라 구간의 비율로 변환
+            // ───────────────────────
+            // 전체 카메라 깊이 범위:
+            // CameraNear ─CameraFar
+            //     0           1
+            //
+            // 이번 구간의 시작과 끝이 이 범위에서 어디에 있는지 구한다.
+            //
+            // 예:
+            // CameraNear = 1, CameraFar = 101
+            // SplitNear  = 11, SplitFar = 31
+            // 
+            // 전환 길이가 구간 길이의 10%라면:
+            // FadeLength = (31 - 11) * 0.1 = 2
+            // RenderNear = 11
+            // RenderFar = 33(EndDepth에 의해 제한되지 않는 경우)
+            // 
+            // NearRatio = (11 - 1) / (101 - 1) = 0.1
+            // FarRatio  = (33 - 1) / (101 - 1) = 0.32
+            // 이 비율로 카메라 프러스텀의 Near~Far 꼭짓점 사이를 보간하여,
+            // 이번 Cascade를 렌더링할 프러스텀 꼭짓점을 구한다.
+
+            const float NearRatio = (RenderNear - CameraNear) / (CameraFar - CameraNear);
+            const float FarRatio = (RenderFar - CameraNear) / (CameraFar - CameraNear);
+
+            // 이번 Cascade 프러스텀 꼭짓점 8개를 저장한다.
+            //
+            // [0~3]: 이번 구간의 Near 평면 꼭짓점
+            // [4~7]: 이번 구간의 Far 평면 꼭짓점
+            //
+            // 모든 좌표는 World Space 좌표기준
+
+            std::array<FVector, 8> SplitCorners{};
+
+            // ──────────────────────
+            // 전체 카메라 프러스텀에서 이번 구간만 잘라내기
+            // ──────────────────────
+
+            for (uint32 Plane = 0; Plane < 2; ++Plane)
+            {
+                const float Depth = Plane == 0 ? RenderNear : RenderFar;
+                const float HalfWidth = Depth * TanHalfFovX;
+                const float HalfHeight = Depth * TanHalfFovY;
+
+                for (uint32 Corner = 0; Corner < 4; ++Corner)
+                {
+                    const float YSign = (Corner & 1u) ? 1.0f : -1.0f;
+                    const float ZSign = (Corner & 2u) ? 1.0f : -1.0f;
+
+                    const FVector LocalCorner(Depth, YSign * HalfWidth, ZSign * HalfHeight);
+
+                    SplitCorners[Plane * 4 + Corner] = CameraWorld.TransformPosition(LocalCorner);
+                }
+            }
+
+            // 카메라 위치·회전의 영향을 받지 않는 반경.
+            const float HalfDepth = (RenderFar - RenderNear) * 0.5f;
+            const float FarHalfWidth = RenderFar * TanHalfFovX;
+            const float FarHalfHeight = RenderFar * TanHalfFovY;
+
+            const float StableRadius = std::sqrt(HalfDepth * HalfDepth + FarHalfWidth * FarHalfWidth + FarHalfHeight * FarHalfHeight);
+
+
+            // ──────────────────────
+            // Cascade 그림자 생성 후보 수집
+            // ──────────────────────
+
+            // SplitCorners가 나타내는 공간을 기준으로 light camera를 배치하고,
+            // LightDirection 방향을 바라보도록 한다.
+            //
+            // 이번 Cascade 범위에 맞는 컬링용 Light ViewProjection을 만든다.
+            // 투영된 경계의 X/Y 범위로 그림자 맵 영역과 겹치는 물체를 찾는다.
+
+            const FMatrix CullingLightVP =  ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution,std::numeric_limits<float>::infinity(), StableRadius);
+
+            TArray<FPrimitiveSceneProxy*>& ShadowCasters = CascadeShadowCasters[Index];
+
+            Scene.BVH.Query(
+                [&CullingLightVP](const FBox& WorldBounds) {
+                    const FBox ProjectedBounds = WorldBounds.GetWorldAABB(CullingLightVP);
+
+                    // 깊이는 이후 caster를 기준으로 확장하므로 여기서는 검사하지 않는다.
+                    return ProjectedBounds.Min.X <= 1.0f && ProjectedBounds.Max.X >= -1.0f &&
+                        ProjectedBounds.Min.Y <= 1.0f && ProjectedBounds.Max.Y >= -1.0f;
+                },
+                [&ShadowCasters](FPrimitiveSceneProxy* Proxy) {
+                    if (!Proxy || !Proxy->IsVisible() || !Proxy->GetCastShadows() || !Proxy->GetMesh() || !Proxy->GetRenderState() || Proxy->GetLODCount() == 0)
+                    {
+                        return;
+                    }
+
+                    ShadowCasters.Add(Proxy);
+                });
+
+            const FMatrix LightView = ShadowRenderer->BuildDirectionalLightView(SplitCorners, LightDirection);
+
+            const FBox ReceiverBounds = ShadowRenderer->CalculateLightSpaceBounds(SplitCorners, LightView);
+
+            float MinCasterDepth = ReceiverBounds.Min.X;
+
+            // Receiver의 최소 깊이를 기준으로,
+            // 수집된 caster가 더 광원 쪽에 있으면 Near 경계를 확장한다.
+            for (const FPrimitiveSceneProxy* Proxy : ShadowCasters)
+            {
+                const FAABB& Bounds = Proxy->GetBounds();
+
+                const FBox WorldBounds{ Bounds.Center - Bounds.Extent, Bounds.Center + Bounds.Extent };
+
+                const FBox LightBounds = WorldBounds.GetWorldAABB(LightView);
+
+                MinCasterDepth = std::min(MinCasterDepth, LightBounds.Min.X);
+            }
+
+            // CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution, MinCasterDepth);
+            CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution, MinCasterDepth, StableRadius);
 
             SplitNear = SplitFar;
             Weight *= DistributionExponent;
@@ -1355,7 +1606,7 @@ bool FRenderer::RenderShadowDepth(const FScene& Scene, const FShadowPassDesc& De
     return true;
 }
 
-void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, float CameraNear, float CameraFar, bool bOrthographic, const EViewMode ViewMode)
+void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, float CameraNear, float CameraFar, bool bOrthographic, const EViewMode ViewMode, const FMatrix& CameraWorld, float TanHalfFovX, float TanHalfFovY)
 {
     if (LightData.DirectionalLight.ShadowParameters.W <= 0.0f)
         return;
@@ -1376,14 +1627,43 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
         const FVector LightDirection(Direction.X, Direction.Y, Direction.Z);
         const float ShadowDistance = std::min(CameraFar, 40.0f);
 
-        LightVP = ShadowRenderer->BuildDirectionalLightVP(CameraViewProjection, CameraNear, CameraFar, ShadowDistance, LightDirection, ShadowMap->GetWidth());
+        //LightVP = ShadowRenderer->BuildDirectionalLightVP(CameraViewProjection, CameraNear, CameraFar, ShadowDistance, LightDirection, ShadowMap->GetWidth());
 
-        GatherShadowCasters(Scene, LightVP, FrustumSidePlanesMask, ShadowCasters);
+        // CameraNear ~ ShadowDistance 구간의 코너를 직접 생성한다.
+        std::array<FVector, 8> ShadowCorners{};
 
+        for (uint32 Plane = 0; Plane < 2; ++Plane)
+        {
+            const float Depth = Plane == 0 ? CameraNear : ShadowDistance;
+
+            for (uint32 Corner = 0; Corner < 4; ++Corner)
+            {
+                const float YSign = (Corner & 1u) ? 1.0f : -1.0f;
+                const float ZSign = (Corner & 2u) ? 1.0f : -1.0f;
+
+                const FVector LocalCorner(
+                    Depth,
+                    YSign * Depth * TanHalfFovX,
+                    ZSign * Depth * TanHalfFovY);
+
+                ShadowCorners[Plane * 4 + Corner] =
+                    CameraWorld.TransformPosition(LocalCorner);
+            }
+        }
+
+        // 카메라 위치·회전과 관계없이 일정한 반경을 사용한다.
+        const float HalfDepth = (ShadowDistance - CameraNear) * 0.5f;
+        const float FarHalfWidth = ShadowDistance * TanHalfFovX;
+        const float FarHalfHeight = ShadowDistance * TanHalfFovY;
+
+        const float StableRadius = std::sqrt(HalfDepth * HalfDepth + FarHalfWidth * FarHalfWidth + FarHalfHeight * FarHalfHeight);
+
+        // BVH 컬링에 사용할 행렬.
+        LightVP = ShadowRenderer->BuildDirectionalLightVPFromCorners(ShadowCorners, LightDirection, ShadowMap->GetWidth(), std::numeric_limits<float>::infinity(), StableRadius);
+
+        GatherShadowCasters(Scene, LightVP,FrustumSidePlanesMask, ShadowCasters);
         // 그림자를 받을 영역의 Light Space 깊이 범위를 구한다.
-        const auto FrustumCorners = GetFrustumCornersWorld(CameraViewProjection);
-        const auto ShadowCorners = ShadowRenderer->LimitFrustumToShadowDistance(FrustumCorners, CameraNear, CameraFar, ShadowDistance);
-        const FMatrix LightView = ShadowRenderer->BuildDirectionalLightView(ShadowCorners, LightDirection);
+        const FMatrix LightView =  ShadowRenderer->BuildDirectionalLightView(ShadowCorners, LightDirection);
         const FBox ReceiverBounds = ShadowRenderer->CalculateLightSpaceBounds(ShadowCorners, LightView);
 
         float MinCasterDepth = ReceiverBounds.Min.X;
@@ -1398,7 +1678,8 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
             MinCasterDepth = std::min(MinCasterDepth, LightBounds.Min.X);
         }
 
-        LightVP = ShadowRenderer->BuildDirectionalLightVPFromCorners(ShadowCorners, LightDirection, ShadowMap->GetWidth(), MinCasterDepth);
+        //LightVP = ShadowRenderer->BuildDirectionalLightVPFromCorners(ShadowCorners, LightDirection, ShadowMap->GetWidth(), MinCasterDepth);
+        LightVP = ShadowRenderer->BuildDirectionalLightVPFromCorners(ShadowCorners, LightDirection, ShadowMap->GetWidth(), MinCasterDepth, StableRadius);
     }
 
     FShadowPassDesc Desc{};

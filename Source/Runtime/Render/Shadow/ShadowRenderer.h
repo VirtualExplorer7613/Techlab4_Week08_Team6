@@ -60,6 +60,13 @@ struct FShadowQuadNode
     int32 Children[4] = {-1, -1, -1, -1};
 };
 
+struct FShadowFrustum
+{
+    std::array<FVector, 8> Corners{};
+    FVector CenterWorld = FVector(0.0f, 0.0f, 0.0f);
+    float Radius = 0.0f;
+};
+
 class FShadowAtlasAllocator
 {
 public:
@@ -198,7 +205,8 @@ public:
     FMatrix BuildDirectionalLightVP(const FMatrix& CameraVP, float CameraNear, float CameraFar, float ShadowDistance, const FVector& LightDirection, uint32 ShadowResolution) const;
 
     // Frustum 코너 8개를 받아 Directional Light VP를 계산한다.
-    FMatrix BuildDirectionalLightVPFromCorners(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection, uint32 ShadowResolution, float MinCasterDepth = std::numeric_limits<float>::infinity()) const;
+    //FMatrix BuildDirectionalLightVPFromCorners(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection, uint32 ShadowResolution, float MinCasterDepth = std::numeric_limits<float>::infinity()) const;
+    FMatrix BuildDirectionalLightVPFromCorners(const std::array<FVector, 8>& FrustumCornersWorld, const FVector& LightDirection, uint32 ShadowResolution, float MinCasterDepth = std::numeric_limits<float>::infinity(), float StableRadius = 0.0f) const;
 
     // Frustum의 원거리 꼭짓점을 ShadowDistance에 맞춰 보간한다.
     std::array<FVector, 8> LimitFrustumToShadowDistance(const std::array<FVector, 8>& Corners, float CameraNear, float CameraFar, float ShadowDistance) const;
