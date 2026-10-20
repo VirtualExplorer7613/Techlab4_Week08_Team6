@@ -105,8 +105,10 @@ struct FPointLightInfo
     float4 PositionRadius;
     float4 ColorIntensity;
     float4 FalloffEnabled;
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
     float4 ShadowParameters; // x : Shadow Depth Bias, y : Shadow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
+    matrix ViewProjection[6];
+    float4 AtlasScaleOffset[6]; // xy : scale, zw : offset
 };
 
 struct FSpotLightInfo
@@ -116,9 +118,10 @@ struct FSpotLightInfo
     float4 FalloffEnabled;
     float4 OutAngleInvCosDiff;
     float4 FowardVector;
-    matrix ViewProjection;
-    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shadow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
+    matrix ViewProjection;    
+    float4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
     float4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
+    float4 AtlasScaleOffset; // xy : scale, zw : offset
 };
 
 struct FAmbientLightInfo
@@ -153,7 +156,9 @@ StructuredBuffer<FSpotLightInfo> SpotLights : register(t9);
 
 Texture2D<float> DirectionalShadowMap : register(t10);
 Texture2D<float> SpotShadowMap : register(t11);
+Texture2DArray<float> CascadeShadowMap : register(t13);
 TextureCube<float> PointShadowMap : register(t12);
+Texture2D<float> ShadowMapAtlas : register(t14);
 
 cbuffer TileBasedCullingConstants : register(b4)
 {
@@ -166,6 +171,24 @@ cbuffer TileBasedCullingConstants : register(b4)
     uint TilePointLightCount;
     uint TileSpotLightCount;
     uint2 Padding;
+};
+
+cbuffer CascadeDebugConstants : register(b5)
+{
+    row_major float4x4 CascadeLightVP[4];
+
+    float4 CascadeCameraForward;
+    float4 CascadeSplitDepths;
+    float4 CascadeBlendEndDepths;
+
+    float CascadeShadowDistance;
+    float CascadeInvResolution;
+    uint CascadeCount;
+    uint CSMEnabled;
+
+    uint DebugColorsEnabled;
+    uint CascadeBlendEnabled;
+    uint2 CascadePadding;
 };
 
 #define TILE_SIZE 16
@@ -442,27 +465,77 @@ float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 sha
 
 float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint index, float invMapSize)
 {
-    // TODO : 여러개 지원 해야함
-    if (index != 0 || PointLights[0].ShadowParameters.w == 0 || bReceiveShadow == 0)
+    if (PointLights[index].ShadowParameters.w == 0 || bReceiveShadow == 0)
     {
         return 1.0f;
     }
 
     float3 lightToPixel = worldPos - lightPos;    
-    if (length(lightToPixel) > PointLights[0].PositionRadius.w)
+    if (length(lightToPixel) > PointLights[index].PositionRadius.w)
     {
         return 1.0f;
     }
 
     float near = 0.1f;
-    float far = PointLights[0].PositionRadius.w;
+    float far = PointLights[index].PositionRadius.w;
     float viewDepth = max(abs(lightToPixel.x), max(abs(lightToPixel.y), abs(lightToPixel.z)));
     float projDepth = far / (far - near) - (near * far) / ((far - near) * viewDepth);
 
-    float NdotL = saturate(dot(normal, -normalize(lightToPixel).xyz));
-    float2 texelSize = float2(PointLights[0].ShadowParameters.z, PointLights[0].ShadowParameters.z); // 이따가 사용
+    uint faceIndex = 0;
+    
+    // Find pixel face
+    if (viewDepth == abs(lightToPixel.x))
+    {
+        if (lightToPixel.x > 0)
+            faceIndex = 0;
+        else
+            faceIndex = 1;
 
-    float bias = PointLights[0].ShadowParameters.x + PointLights[0].ShadowParameters.y * (1.0f - NdotL);
+    }
+    else if (viewDepth == abs(lightToPixel.y))
+    {
+        if (lightToPixel.y > 0)
+            faceIndex = 2;
+        else
+            faceIndex = 3;
+    }
+    else
+    {
+        if (lightToPixel.z > 0)
+            faceIndex = 4;
+        else
+            faceIndex = 5;
+    }
+
+    if (PointLights[index].AtlasScaleOffset[faceIndex].x <= 0.0f)
+        return 1.0f;
+
+    float4 shadowPos = mul(float4(worldPos.xyz, 1.0f), PointLights[index].ViewProjection[faceIndex]);
+    if (shadowPos.w <= 0)
+    {
+        return 1;
+    }
+    shadowPos.xyz /= shadowPos.w; // W divde
+    shadowPos.x = shadowPos.x * 0.5f + 0.5f;
+    shadowPos.y = -shadowPos.y * 0.5f + 0.5f;
+
+    // 뷰포트 밖이면 그림자 없음
+    if (shadowPos.x < 0.0f || shadowPos.x > 1.0f || shadowPos.y < 0.0f || shadowPos.y > 1.0f)
+    {
+        return 1.0f;
+    }
+
+    shadowPos.xy = shadowPos.xy * PointLights[index].AtlasScaleOffset[faceIndex].xy + PointLights[index].AtlasScaleOffset[faceIndex].zw;
+
+    if (PointLights[index].ShadowParameters.w == 0.0f || bReceiveShadow == 0)
+    {
+        return 1.0f;
+    }
+    
+    float NdotL = saturate(dot(normal, -normalize(lightToPixel).xyz));
+    float2 texelSize = float2(PointLights[0].ShadowParameters.z, PointLights[0].ShadowParameters.z);
+
+    float bias = PointLights[index].ShadowParameters.x + PointLights[index].ShadowParameters.y * (1.0f - NdotL);
     
     return ShadowFilteringCube(PointShadowMap, lightToPixel, projDepth, bias, invMapSize);
 
@@ -499,12 +572,7 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
 
 float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLightInfo info)
 {
-    // TODO : 여러개 지원 해야함
-    if (index != 0)
-    {
-        return 1;
-    }
-    float4 shadowPos = mul(float4(worldPos, 1.0f), SpotLights[0].ViewProjection);
+    float4 shadowPos = mul(float4(worldPos, 1.0f), SpotLights[index].ViewProjection);
     if (shadowPos.w <= 0)
     {
         return 1;
@@ -519,21 +587,35 @@ float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLight
         return 1.0f;
     }
 
-    if (SpotLights[0].ShadowParameters.w == 0.0f || bReceiveShadow == 0)
+    shadowPos.xy = shadowPos.xy * SpotLights[index].AtlasScaleOffset.xy + SpotLights[index].AtlasScaleOffset.zw;
+
+    if (SpotLights[index].ShadowParameters.w == 0.0f || bReceiveShadow == 0)
     {
         return 1.0f;
     }
     
-    float2 texelSize = float2(SpotLights[0].ShadowParameters.z, SpotLights[0].ShadowParameters.z);
+    float2 texelSize = float2(SpotLights[index].ShadowParameters.z, SpotLights[index].ShadowParameters.z);
 
-    float3 toLight = SpotLights[0].PositionRadius.xyz - worldPos;
+    float3 toLight = SpotLights[index].PositionRadius.xyz - worldPos;
     float distance = length(toLight);
     float3 lightDir = toLight / max(distance, 0.0001f); // length를 한 번만 계산하고 0으로 나누기를 막는다
     
     float NdotL = saturate(dot(normal, lightDir));
     
-    float bias = SpotLights[0].ShadowParameters.x + SpotLights[0].ShadowParameters.y * (1.0f - NdotL);
+    float bias = SpotLights[index].ShadowParameters.x + SpotLights[index].ShadowParameters.y * (1.0f - NdotL);
     
+    float visibility = 0.0f;
+    for (int x = -1; x <= 1; ++x)
+    {
+        for (int y = -1; y <= 1; ++y)
+        {
+            float2 offset = float2(x, y) * texelSize;
+            float depth = ShadowMapAtlas.SampleLevel(g_SampleShadow, shadowPos.xy + offset, 0);
+            visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
+        }
+    }
+    visibility /= 9.0f;
+    return visibility;
     return ShadowFiltering2D(SpotShadowMap, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
 }
 
@@ -579,9 +661,126 @@ float3 CalculateAmbientLight(FAmbientLightInfo info)
     return info.ColorIntensity.xyz * info.ColorIntensity.w;
 }
 
+bool UseCSM()
+{
+    return CSMEnabled != 0 && CascadeCount > 0;
+}
+
+
+bool UseCascadeDebug()
+{
+    return UseCSM() && DebugColorsEnabled != 0;
+}
+
+float GetCascadeViewDepth(float3 worldPos)
+{
+    return dot(worldPos - CameraLocation, CascadeCameraForward.xyz);
+}
+
+uint SelectDebugCascade(float3 worldPos)
+{
+    // float viewDepth = max(dot(worldPos - CameraLocation, CascadeCameraForward.xyz), 0.0f);
+    float viewDepth = max(GetCascadeViewDepth(worldPos), 0.0f);
+
+    float4 selectionDepths = CascadeBlendEnabled != 0 ? CascadeBlendEndDepths : CascadeSplitDepths;
+    
+    uint index = 0;
+    index += viewDepth > selectionDepths.x ? 1u : 0u;
+    index += viewDepth > selectionDepths.y ? 1u : 0u;
+    index += viewDepth > selectionDepths.z ? 1u : 0u;
+
+    return min(index, max(CascadeCount, 1u) - 1u);
+}
+
+float3 GetDebugCascadeColor(uint index)
+{
+    if (index == 0)
+        return float3(1, 0, 0);
+    
+    if (index == 1)
+        return float3(0, 1, 0);
+    
+    if (index == 2)
+        return float3(0, 0, 1);
+    
+    return float3(1, 0, 1);
+}
+
+// Cascade 보간
+float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentVisibility, float bias)
+{
+    if (CascadeBlendEnabled == 0 ||
+        cascadeIndex + 1 >= CascadeCount)
+    {
+        return currentVisibility;
+    }
+
+    float viewDepth = GetCascadeViewDepth(worldPos);
+    float blendStart = CascadeSplitDepths[cascadeIndex];
+    float blendEnd = CascadeBlendEndDepths[cascadeIndex];
+
+    // 전환 구간에 들어오지 않았다면 추가 샘플링 생략
+    if (blendEnd <= blendStart || viewDepth <= blendStart)
+    {
+        return currentVisibility;
+    }
+
+    uint nextIndex = cascadeIndex + 1;
+    
+    float4 nextPos = mul(float4(worldPos, 1.0f), CascadeLightVP[nextIndex]);
+
+    nextPos.xyz /= nextPos.w;
+    nextPos.x = nextPos.x * 0.5f + 0.5f;
+    nextPos.y = -nextPos.y * 0.5f + 0.5f;
+
+    // 다음 맵에서 유효하지 않은 위치면 현재 결과 유지
+    if (any(nextPos.xyz < 0.0f) || any(nextPos.xyz > 1.0f))
+    {
+        return currentVisibility;
+    }
+
+    float2 texelSize = float2(CascadeInvResolution, CascadeInvResolution);
+
+    float nextVisibility = 0.0f;
+
+    // 이중 반복문으로 3*3 위치 방문
+    for (int x = -1; x <= 1; ++x)
+    {
+        for (int y = -1; y <= 1; ++y)
+        {
+            // 텍셀 단위 이동을 UV 단위로 변환
+            float2 offset = float2(x, y) * texelSize;
+
+            float depth = CascadeShadowMap.SampleLevel(g_SampleShadow, float3(nextPos.xy + offset, (float) nextIndex), 0);
+
+            nextVisibility += (nextPos.z - bias) <= depth ? 1.0f : 0.0f;
+        }
+    }
+    nextVisibility /= 9.0f;
+    // 현재 픽셀이 전환 구간을 얼마나 지나왔는지 0~1로 계산
+    float t = saturate((viewDepth - blendStart) / (blendEnd - blendStart));
+    
+    return lerp(currentVisibility, nextVisibility, t);
+    
+}
+
 float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLightInfo info)
 {
-    float4 shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
+    bool useCascade = UseCSM();
+    uint cascadeIndex = useCascade ? SelectDebugCascade(worldPos) : 0u;
+
+    float4 shadowPos;
+
+    if (useCascade)
+    {
+        shadowPos = mul(float4(worldPos, 1.0f), CascadeLightVP[cascadeIndex]);
+    }
+    else
+    {
+        shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
+    }
+    
+    // float4 shadowPos = mul(float4(worldPos, 1.0f), DirectionalLight.LightVP);
     shadowPos.xyz /= shadowPos.w; // W divde
     shadowPos.x = shadowPos.x * 0.5f + 0.5f;
     shadowPos.y = -shadowPos.y * 0.5f + 0.5f;
@@ -596,13 +795,44 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLig
     {
         return 1.0f;
     }
-    
-    float2 texelSize = float2(DirectionalLight.ShadowParameters.z, DirectionalLight.ShadowParameters.z);
 
+    float invResolution = useCascade ? CascadeInvResolution : DirectionalLight.ShadowParameters.z;
+    //float invResolution = DirectionalLight.ShadowParameters.z;
+
+    //float2 texelSize = float2(DirectionalLight.ShadowParameters.z, DirectionalLight.ShadowParameters.z);
+
+    float2 texelSize = float2(invResolution, invResolution);
+    
     float NdotL = saturate(dot(normal, -DirectionalLight.Direction.xyz));
     
     float bias = DirectionalLight.ShadowParameters.x + DirectionalLight.ShadowParameters.y * (1.0f - NdotL);
     
+    float visibility = 0.0f;
+    for (int x = -1; x <= 1; ++x)
+    {
+        for (int y = -1; y <= 1; ++y)
+        {
+            float2 offset = float2(x, y) * texelSize;
+            float depth;
+            if (useCascade)
+            {
+                depth = CascadeShadowMap.SampleLevel(g_SampleShadow, float3(shadowPos.xy + offset, (float) cascadeIndex), 0);
+            }
+            else
+            {
+                depth = DirectionalShadowMap.SampleLevel(g_SampleShadow, shadowPos.xy + offset, 0);
+            }
+            visibility += (shadowPos.z - bias) <= depth ? 1.0f : 0.0f;
+        }
+    }
+    visibility /= 9.0f;
+
+    if (useCascade)
+    {
+        visibility = ApplyCascadeShadowBlend(worldPos, cascadeIndex, visibility, bias);
+    }
+    
+    return visibility;
     return ShadowFiltering2D(DirectionalShadowMap, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y);
 }
 
@@ -685,6 +915,35 @@ FLightResult CalculateLighting(float3 worldPos, float3 normal, float3 viewDir)
     Total.Specular += Directional.Specular;
 
     return Total;
+}
+
+float3 ApplyCascadeDebugColor(float3 shadedColor, float3 worldPos, float3 normal)
+{
+    if (!UseCascadeDebug())
+        return shadedColor;
+
+    float viewDepth = GetCascadeViewDepth(worldPos);
+
+    if (viewDepth < 0.0f || viewDepth > CascadeShadowDistance)
+    {
+        return shadedColor;
+    }
+
+    // Direction은 빛이 진행하는 방향.
+    // 반대로 뒤집어 표면에서 광원으로 향하는 방향을 구한다.
+    float3 lightDir = normalize(-DirectionalLight.Direction.xyz);
+
+    float NdotL = dot(normal, lightDir);
+    if (NdotL <= 0.0f)
+        return shadedColor;
+    
+    float visibility = CalculateDirectionalShadow(worldPos, normal);
+    float shadowAmount = saturate(1.0f - visibility);
+
+    uint cascadeIndex = SelectDebugCascade(worldPos);
+    float3 debugColor = GetDebugCascadeColor(cascadeIndex);
+
+    return lerp(shadedColor, debugColor, shadowAmount);
 }
 
 struct VS_INPUT
@@ -826,6 +1085,7 @@ float4 mainPS(PS_INPUT input) : SV_TARGET
 #endif
     finalRGB = ACESFilmicToneMapping(finalRGB);
     finalRGB = pow(finalRGB, 1.0f / 2.2f);
-    
+
+    finalRGB = ApplyCascadeDebugColor(finalRGB, input.worldPos, normal);    
     return float4(finalRGB, alpha);
 }

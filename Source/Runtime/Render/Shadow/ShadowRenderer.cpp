@@ -214,6 +214,25 @@ bool FShadowRenderer::Init(uint32 ShadowMapSize)
         //return false;
     }
 
+    D3D11_TEXTURE2D_DESC ShadowMapAtlasDesc{};
+    ShadowMapAtlasDesc.Width = SHADOW_ATLAS_MAP_SIZE;
+    ShadowMapAtlasDesc.Height = SHADOW_ATLAS_MAP_SIZE;
+    ShadowMapAtlasDesc.MipLevels = 1;
+    ShadowMapAtlasDesc.ArraySize = 1;
+    ShadowMapAtlasDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+    ShadowMapAtlasDesc.SampleDesc.Count = 1;
+    ShadowMapAtlasDesc.Usage = D3D11_USAGE_DEFAULT;
+    ShadowMapAtlasDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+
+    ShadowMapAtlas = RenderCommand::CreateTexture2D(ShadowMapAtlasDesc);
+    if (!ShadowMapAtlas || !ShadowMapAtlas->GetRawPtr() || !ShadowMapAtlas->GetDSV() || !ShadowMapAtlas->GetSRV())
+    {
+        ShadowMapAtlas.reset();
+        return false;
+    }
+
+    ShadowAtlasAllocator.Init(SHADOW_ATLAS_MAP_SIZE);
+
     return true;
 }
 
@@ -238,6 +257,11 @@ bool FShadowRenderer::BeginShadowPass(const FShadowPassDesc &Desc)
     RenderCommand::SetBlendState(EBlendState::NoColorWrite);
 
     return true;
+}
+
+void FShadowRenderer::SetShadowViewPort(const uint32 X, const uint32 Y, const uint32 Width, const uint32 Height)
+{
+    RenderCommand::SetViewport(X, Y, Width, Height);
 }
 
 void FShadowRenderer::EndShadowPass()

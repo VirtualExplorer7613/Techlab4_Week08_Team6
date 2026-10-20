@@ -10,6 +10,7 @@
 #include "TileBasedCulling/TileBasedCulling.h"
 #include "Shared/LightDefinitions.h"
 #include "Shadow/ShadowRenderer.h"
+#include "Shadow/CascadeShadowMaps.h"
 
 constexpr uint32 ObjectSlotBytes = 256;
 
@@ -59,9 +60,11 @@ struct alignas(16) FPointLight
 	FVector4 ColorIntensity = FVector4(0, 0, 0, 0); // rgb: 색상, w: 강도
 	FVector4 FalloffEnabled = FVector4(1, 0, 0, 0); // x: 반경 감쇠, y: 사용 여부, zw: 패딩
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
+	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
+    FMatrix ViewProjection[6];
+    FVector4 AtlasScaleOffset[6]; // xy : scale, zw : offset
 };
-static_assert(sizeof(FPointLight) == 80, "FPointLight must be 80 bytes");
+static_assert(sizeof(FPointLight) == 560, "FPointLight must be 544 bytes");
 
 struct alignas(16) FSpotLight
 {
@@ -72,7 +75,8 @@ struct alignas(16) FSpotLight
 	FVector4 ForwardVector = FVector4(1, 0, 0, 0);		// xyz : 전방벡터
     FMatrix ViewProjection;                            // ViewProjection 행렬. 그림자 맵을 만들 때 사용
     FVector4 ShadowParameters; // x : Shadow Depth Bias, y : Shdaow Slope Scale, z : Inveerse Shadow Map Size, w : bCastShowShadow(1.0f : 0.0f)
-    FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
+	FVector4 ShadowFilterParameters; // x : ShadowSharpen ,y : TransitionScale, zw : 패딩
+    FVector4 AtlasScaleOffset; // xy : scale, zw : offset
 };
 static_assert(sizeof(FSpotLight) == 176, "FSpotLight must be 176 bytes");
 
@@ -115,6 +119,29 @@ struct alignas(16) FLightGlobalConstants
 	uint32 Padding = 0;
 };
 static_assert(sizeof(FLightGlobalConstants) == 160, "FLightGlobalConstants must match UberLit LightConstants");
+
+struct alignas(16) FCascadeDebugConstants
+{
+    FMatrix LightVP[4];
+
+    FVector4 CameraForward = FVector4(1, 0, 0, 0);
+
+    // 임시 경계값, 월드 단위. W는 사용하지 않는다.
+    FVector4 SplitDepths = FVector4(5, 15, 30, 0);
+    FVector4 BlendEndDepths;
+
+    // 16바이트
+    float ShadowDistance = 0.0f;
+    float InvResolution = 0.0f;
+    uint32 CascadeCount = 0;
+    uint32 CSMEnabled = 0;
+    // 16바이트
+    uint32 DebugColorsEnabled = 0;
+    uint32 BlendEnabled = 0;
+    uint32 Padding[2] = {};
+};
+
+static_assert(sizeof(FCascadeDebugConstants) == 336, "FCascadeDebugConstants Size Error");
 
 class FRenderer
 {
@@ -171,6 +198,8 @@ public:
     void RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
     void RenderPointShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
 
+    void RenderShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
+
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
 	inline void WriteObjectSlot(uint8* SlotBase, uint32 SlotIndex, const FMatrix& World)
 	{
@@ -225,6 +254,10 @@ public:
     {
         return ShadowRenderer ? ShadowRenderer->GetPointLightShadowMap() : nullptr;
     }
+    FTexture2D* GetShadowMap() const
+    {
+        return ShadowRenderer ? ShadowRenderer->GetShadowMapAtlas() : nullptr;
+    }
 
     ID3D11ShaderResourceView *GetSpotShadowMapSRV() const
     {
@@ -236,6 +269,53 @@ public:
     {
         FTexture2D *DirectionalShadowMap = GetDirectionalShadowMap();
         return DirectionalShadowMap ? DirectionalShadowMap->GetSRV() : nullptr;
+    }
+
+    ID3D11ShaderResourceView* GetShadowMapSRV() const
+    {
+        FTexture2D* ShadowMap = GetShadowMap();
+        return ShadowMap ? ShadowMap->GetSRV() : nullptr;
+    }
+
+    const FCascadeShadowMaps &GetCascadeShadowMaps() const
+    {
+        return CascadeShadowMaps;
+    }
+
+    void RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, EViewMode ViewMode);
+
+    bool GetCascadeDebugColors() const
+    {
+        return bCascadeDebugColors;
+    }
+
+    void SetCascadeDebugColors(bool bEnabled)
+    {
+        bCascadeDebugColors = bEnabled;
+    }
+
+    void UpdateCascadeDebugConstants(const FVector &CameraForward);
+
+    void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
+
+    void SetCSMEnabled(bool bEnabled)
+    {
+        bCSMEnabled = bEnabled;
+    }
+
+    bool GetCSMEnabled() const
+    {
+        return bCSMEnabled;
+    }
+
+    bool GetCascadeBlendEnabled() const
+    {
+        return bCascadeBlendEnabled;
+    }
+
+    void SetCascadeBlendEnabled(bool bEnabled)
+    {
+        bCascadeBlendEnabled = bEnabled;
     }
 
 private:
@@ -305,4 +385,13 @@ private:
 
     // Shadow map pass에서만 사용
     bool bShadowMapPass = false;
+
+    FCascadeDebugConstants CascadeConstants{};
+    bool bCSMEnabled = true;
+    float CSMShadowDistance = 40.0f;
+
+    FCascadeShadowMaps CascadeShadowMaps;
+    bool bCascadeDebugColors = false;
+    bool bCascadeBlendEnabled = false;
+    TUniquePtr<FConstantBuffer> CascadeDebugCB;
 };
