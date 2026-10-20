@@ -220,6 +220,15 @@ bool UEditorEngine::Init()
                 Renderer->SetCSMEnabled(bCSMEnabled);
             }
 
+            float Exponent = Renderer->GetCSMDistributionExponent();
+
+            DrawCSMSettingsContent();
+
+            if (ImGui::DragFloat("Distribution Exponent", &Exponent, 0.05f, 0.1f, 10.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+            {
+                Renderer->SetCSMDistributionExponent(Exponent);
+            }
+
             bool bDebugColors = Renderer->GetCascadeDebugColors();
 
             ImGui::BeginDisabled(!bCSMEnabled);
@@ -251,7 +260,7 @@ bool UEditorEngine::Init()
         {
             ImGui::SeparatorText("Cascade Shadow Maps");
 
-            DrawCascadeShadowPreviewContent(Renderer->GetCascadeShadowMaps());
+            DrawCascadeShadowPreviewContent(Renderer->GetCascadePreviewMaps());
         }
 
         ImGui::PopID();
@@ -996,6 +1005,8 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 {
 	const FEditorSettings& Settings = SettingsPanel->GetSettings();
 	const EViewMode ViewMode = MultipleViewportsAdapter.GetViewMode(ViewIndex);
+    const bool bRenderShadows = ViewMode != EViewMode::Unlit && MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Shadows);
+
 	// Light Culling 뷰 모드는 컬링 결과를 보여주는 모드라 설정과 상관없이 컬링을 돌린다.
 	const bool bLightCullingView = ViewMode == EViewMode::LightCulling;
 	const bool bPrepass = MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Primitives) && (Settings.bTileBasedLightCulling || bLightCullingView) && ViewMode != EViewMode::Wireframe; //depth prepass를 할 것인가
@@ -1008,15 +1019,22 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 
     const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
 
-    Renderer->SetShadowQuality(Settings.ShadowQuality);
-    Renderer->SetTransitionFactor(Settings.TransitionFactor);
-    Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
-    //Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
-    //Renderer->RenderPointShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
-    Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+    if (bRenderShadows)
+    {
+		Renderer->SetShadowQuality(Settings.ShadowQuality);
+		Renderer->SetTransitionFactor(Settings.TransitionFactor);
+        Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+        //Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+        //Renderer->RenderPointShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+    	Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
 
-    Renderer->UpdateCascadeDebugConstants(ViewWorld.GetScene(), ViewProjection, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex));
-    Renderer->RenderCascadeShadowPreview(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+    	Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+
+		if (ViewIndex == MultipleViewportsAdapter.GetEditorViewIndex())
+		{
+			Renderer->CaptureCascadePreview();
+		}
+	}
 
 	if (bPrepass)
 	{
@@ -1028,6 +1046,8 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	{
 		bTileCulled = ComputeTileBasedLight(ViewIndex, ViewRenderingInfo, ViewProjection);
 	}
+
+    Renderer->SetShadowsEnabled(bRenderShadows);
 
 	// 1. 불투명 Pass
 	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, bPrepass, bTileCulled);
@@ -1050,12 +1070,8 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 			RenderFXAAPass(ViewIndex, ViewRenderingInfo);
 	}
 
-
-
 	// 4. 오버레이 Pass
 	RenderOverlayPass(ViewIndex, ViewWorld, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, RenderQueue);
-
-
 }
 
 
@@ -1384,6 +1400,39 @@ void UEditorEngine::DrawCascadeShadowPreviewContent(const FCascadeShadowMaps &Ma
         }
 
         ImGui::EndTable();
+    }
+}
+
+void UEditorEngine::DrawCSMSettingsContent()
+{
+    const FCSMSettings Settings = Renderer->GetCSMSettings();
+
+    static const uint32 Resolutions[] = {512, 1024, 2048, 4096};
+
+    static const char *ResolutionLabels[] = {"512", "1024", "2048", "4096"};
+
+    static const char *CascadeLabels[] = {"1", "2", "3", "4"};
+
+    int ResolutionIndex = 0;
+
+    for (int Index = 0; Index < 4; ++Index)
+    {
+        if (Resolutions[Index] == Settings.Resolution)
+        {
+            ResolutionIndex = Index;
+            break;
+        }
+    }
+
+    int CascadeIndex = static_cast<int>(Settings.CascadeCount) - 1;
+
+    bool bChanged = ImGui::Combo("CSM Resolution", &ResolutionIndex, ResolutionLabels, 4);
+
+    bChanged |= ImGui::Combo("CSM Cascades", &CascadeIndex, CascadeLabels, 4);
+
+    if (bChanged)
+    {
+        Renderer->RequestCSMSettings(Resolutions[ResolutionIndex], static_cast<uint32>(CascadeIndex + 1));
     }
 }
 

@@ -28,6 +28,8 @@ public:
         return ArraySRV.Get();
     }
 
+    bool CopyFrom(const FCascadeShadowMaps &Source);
+
 private:
     uint32 Resolution = 0;
     uint32 CascadeCount = 0;

@@ -145,8 +145,8 @@ cbuffer LightConstants : register(b3)
     FDirectionalLightInfo DirectionalLight;
     uint PointLightCount;
     uint SpotLightCount;
+    uint bShowShadows;
     uint ShadowQuality;
-    uint LightPadding;
 };
 
 // 로컬 라이트 배열은 개수 제한이 없고 인덱스가 달라도 느려지지 않는 StructuredBuffer로 읽는다.
@@ -462,6 +462,9 @@ float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 sha
 
 float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint index, float invMapSize, float TransitionScale)
 {
+    if (bShowShadows == 0)
+        return 1.0f;
+    
     if (PointLights[index].ShadowParameters.w == 0 || bReceiveShadow == 0)
     {
         return 1.0f;
@@ -570,6 +573,9 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
 
 float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLightInfo info)
 {
+    if (bShowShadows == 0)
+        return 1.0f;
+    
     float4 shadowPos = mul(float4(worldPos, 1.0f), SpotLights[index].ViewProjection);
     if (shadowPos.w <= 0)
     {
@@ -751,6 +757,9 @@ float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentV
 
 float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLightInfo info)
 {
+    if (bShowShadows == 0)
+        return 1.0f;
+    
     bool useCascade = UseCSM();
     uint cascadeIndex = useCascade ? SelectDebugCascade(worldPos) : 0u;
 
@@ -906,7 +915,7 @@ FLightResult CalculateLighting(float3 worldPos, float3 normal, float3 viewDir)
 
 float3 ApplyCascadeDebugColor(float3 shadedColor, float3 worldPos, float3 normal)
 {
-    if (!UseCascadeDebug())
+    if (bShowShadows == 0 || !UseCascadeDebug())
         return shadedColor;
 
     float viewDepth = GetCascadeViewDepth(worldPos);
