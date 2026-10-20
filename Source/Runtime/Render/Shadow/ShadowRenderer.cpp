@@ -157,14 +157,17 @@ FMatrix FShadowRenderer::BuildPointLightView(const FVector &LightPosition, uint3
     return FMatrix::MakeLookAt(Eye, Target, Up);
 }
 
-FMatrix FShadowRenderer::BuildPointLightProjection(float NearPlane, float FarPlane) const
+FMatrix FShadowRenderer::BuildPointLightProjection(float NearPlane, float FarPlane, uint32 RequestedSize) const
 {
-    return FMatrix::MakePerspective(FMath::DegreesToRadians(90.0f), 1.0f, NearPlane, FarPlane);
+    float Size = (float)RequestedSize;
+    float ExpandesFOV = 2.0f * atan(Size / (Size - 2.0f * (float)SHADOW_ATLAS_BORDER));
+
+    return FMatrix::MakePerspective(ExpandesFOV, 1.0f, NearPlane, FarPlane);
 }
 
-FMatrix FShadowRenderer::BuildPointLightVP(const FVector &LightPosition, float NearPlane, float FarPlane, uint32 FaceIndex) const
+FMatrix FShadowRenderer::BuildPointLightVP(const FVector &LightPosition, float NearPlane, float FarPlane, uint32 RequestedSize, uint32 FaceIndex) const
 {
-    return BuildPointLightView(LightPosition, FaceIndex) * BuildPointLightProjection(NearPlane, FarPlane);
+    return BuildPointLightView(LightPosition, FaceIndex) * BuildPointLightProjection(NearPlane, FarPlane, RequestedSize);
 }
 
 bool FShadowRenderer::Init(uint32 ShadowMapSize)
