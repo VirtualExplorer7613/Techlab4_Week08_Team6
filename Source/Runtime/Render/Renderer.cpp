@@ -445,7 +445,7 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
             // 이번 Cascade 범위에 맞는 컬링용 Light ViewProjection을 만든다.
             // 투영된 경계의 X/Y 범위로 그림자 맵 영역과 겹치는 물체를 찾는다.
 
-            const FMatrix CullingLightVP = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection);
+            const FMatrix CullingLightVP = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution);
 
             TArray<FPrimitiveSceneProxy *> &ShadowCasters = CascadeShadowCasters[Index];
 
@@ -485,7 +485,7 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
                  MinCasterDepth = std::min(MinCasterDepth, LightBounds.Min.X);
             }
 
-            CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, MinCasterDepth);
+            CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution, MinCasterDepth);
 
             SplitNear = SplitFar;
             Weight *= DistributionExponent;
@@ -1269,7 +1269,7 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
         const FVector LightDirection(Direction.X, Direction.Y, Direction.Z);
         const float ShadowDistance = std::min(CameraFar, 40.0f);
 
-        LightVP = ShadowRenderer->BuildDirectionalLightVP(CameraViewProjection, CameraNear, CameraFar, ShadowDistance, LightDirection);
+        LightVP = ShadowRenderer->BuildDirectionalLightVP(CameraViewProjection, CameraNear, CameraFar, ShadowDistance, LightDirection, ShadowMap->GetWidth());
 
 
         Scene.BVH.Query(
@@ -1302,7 +1302,7 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
             MinCasterDepth = std::min(MinCasterDepth, LightBounds.Min.X);
         }
 
-        LightVP = ShadowRenderer->BuildDirectionalLightVPFromCorners(ShadowCorners, LightDirection, MinCasterDepth);
+        LightVP = ShadowRenderer->BuildDirectionalLightVPFromCorners(ShadowCorners, LightDirection, ShadowMap->GetWidth(), MinCasterDepth);
     }
 
     FShadowPassDesc Desc{};
