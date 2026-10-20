@@ -1,7 +1,7 @@
 #include "EnginePCH.h"
 #include "Editor/OutputLog/OutputLogPanel.h"
 
-#include "Core/StatOverlay.h"
+#include "Core/Stats/StatOverlay.h"
 
 static int TextEditCallbackStub(ImGuiInputTextCallbackData* data)
 {
@@ -69,11 +69,11 @@ void FOutputLogPanel::OnRender()
 	ImGui::Checkbox("Auto-scroll", &AutoScroll);
 
 	ImGui::SameLine();
-	if (ImGui::SmallButton("Clear"))
+	if (ImGui::Button("Clear"))
 		ClearLog();
 
 	ImGui::SameLine();
-	bool CopyToClipboard = ImGui::SmallButton("Copy");
+	bool CopyToClipboard = ImGui::Button("Copy");
 
 	ImGui::Separator();
 

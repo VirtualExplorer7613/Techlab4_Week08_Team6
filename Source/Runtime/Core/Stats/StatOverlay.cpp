@@ -1,7 +1,7 @@
 ﻿#include "EnginePCH.h"
 #include "StatOverlay.h"
 
-#include "EngineStatics.h"
+#include "Core/EngineStatics.h"
 
 #include <cctype>
 #include <format>
@@ -70,7 +70,7 @@ bool FStatOverlay::ExecCommand(const FString& CommandLine, FString& OutMessage)
 
 	if (Tokens.Num() < 2)
 	{
-		OutMessage = "Usage: stat <fps|memory|profile|all|none>";
+		OutMessage = "Usage: stat <fps|memory|profile|shadow|all|none>";
 		return true;
 	}
 
@@ -85,7 +85,7 @@ bool FStatOverlay::ExecCommand(const FString& CommandLine, FString& OutMessage)
 
 	if (EqualsIgnoreCase(Arg, "all"))
 	{
-		Flags = EStatFlags::FPS | EStatFlags::Memory | EStatFlags::Profile;
+		Flags = EStatFlags::FPS | EStatFlags::Memory | EStatFlags::Profile | EStatFlags::Shadow;
 		OutMessage = "stat all: all overlays enabled";
 		return true;
 	}
@@ -97,10 +97,12 @@ bool FStatOverlay::ExecCommand(const FString& CommandLine, FString& OutMessage)
 		Target = EStatFlags::Memory;
 	else if (EqualsIgnoreCase(Arg, "profile"))
 		Target = EStatFlags::Profile;
+	else if (EqualsIgnoreCase(Arg, "shadow"))
+		Target = EStatFlags::Shadow;
 
 	if (Target == EStatFlags::None)
 	{
-		OutMessage = std::format("stat: unknown stat '{}'. Available: fps, memory, profile, all, none", Arg);
+		OutMessage = std::format("stat: unknown stat '{}'. Available: fps, memory, profile, shadow, all, none", Arg);
 		return true;
 	}
 

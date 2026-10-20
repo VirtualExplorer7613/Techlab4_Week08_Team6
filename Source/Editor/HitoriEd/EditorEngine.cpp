@@ -5,7 +5,7 @@
 #include "Core/EngineStatics.h"
 #include "Core/EngineTimer.h"
 #include "Launch/LaunchEngineLoop.h"
-#include "Core/StatOverlay.h"
+#include "Core/Stats/StatOverlay.h"
 #include "Input/InputSystem.h"
 
 
@@ -45,6 +45,7 @@ namespace
 	DECLARE_CYCLE_STAT("ImGui", STAT_ImGui);
 }
 
+#include "Core/Stats/ShadowStats.h"
 #include "Core/SplashScreen.h"
 #include <GameFramework/Actor/PointLight.h>
 
@@ -305,7 +306,7 @@ bool UEditorEngine::Init()
         {
             ImGui::SeparatorText("Cascade Shadow Maps");
 
-            DrawCascadeShadowPreviewContent(Renderer->GetCascadePreviewMaps());
+            DrawCascadeShadowPreviewContent();
         }
 
         ImGui::PopID();
@@ -1050,7 +1051,6 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 {
 	const FEditorSettings& Settings = SettingsPanel->GetSettings();
 	const EViewMode ViewMode = MultipleViewportsAdapter.GetViewMode(ViewIndex);
-    const bool bRenderShadows = ViewMode != EViewMode::Unlit && MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Shadows);
 
 	// Light Culling 뷰 모드는 컬링 결과를 보여주는 모드라 설정과 상관없이 컬링을 돌린다.
 	const bool bLightCullingView = ViewMode == EViewMode::LightCulling;
@@ -1061,29 +1061,37 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	if (MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Primitives))
 		Renderer->RenderQueueSorting(RenderQueue, ViewProjection, ViewCameraLocation);
     
-
     const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
 
+    const bool bRenderShadows = ViewMode != EViewMode::Unlit && MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Shadows);
     Renderer->SetShadowsEnabled(bRenderShadows);
 
     if (bRenderShadows)
     {
-		Renderer->SetShadowQuality(Settings.ShadowQuality);
-		Renderer->SetTransitionFactor(Settings.TransitionFactor);
-        Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
-        //Renderer->RenderSpotShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
-        //Renderer->RenderPointShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
-    	Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);		
+        Renderer->SetShadowQuality(Settings.ShadowQuality);
+        Renderer->SetTransitionFactor(Settings.TransitionFactor);
 
-		ViewWorld.GetScene().PostUpdateLightComponents(Renderer);
+        {
+            SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowDirectional);
+            Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+        }
 
-    	Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+        {
+            SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowAtlas);
+            Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewMode);
+        }
 
-		if (ViewIndex == MultipleViewportsAdapter.GetEditorViewIndex())
-		{
-			Renderer->CaptureCascadePreview();
-		}
-	}
+        {
+            SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowCSM);
+            Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode);
+        }
+		ViewWorld.GetScene().PostUpdateLightComponents(Renderer);    	
+
+        if (ViewIndex == MultipleViewportsAdapter.GetEditorViewIndex())
+        {
+            Renderer->CaptureCascadePreview();
+        }
+    }
 
 	if (bPrepass)
 	{
@@ -1098,7 +1106,6 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 
 	// 1. 불투명 Pass
 	RenderOpaquePass(ViewIndex, ViewRenderingInfo, ViewProjection, ViewCameraLocation, ViewCameraForward, bPrepass, bTileCulled);
-	
 
 	if (SettingsPanel->GetSettings().bDepthView)
 	{
@@ -1403,51 +1410,45 @@ void UEditorEngine::SaveSceneAs()
 	FEditorFileUtils::SaveSceneAs(EditorWorld);
 }
 
-void UEditorEngine::DrawCascadeShadowPreviewContent(const FCascadeShadowMaps &Maps)
+void UEditorEngine::DrawCascadeShadowPreviewContent()
 {
-    const FString ShaderPath = "Resources/Shader/CascadeDepthPreview.hlsl";
+    const uint32 Count = Renderer->GetCascadePreviewCount();
 
-    FShaderProgram *Program = FRenderResourceManager::GetShaderProgram(ShaderPath);
-
-    if (!Program || Program->SourcePath != ShaderPath || !Program->PixelShader || !Program->PixelShader->IsValid())
+    if (Count == 0)
     {
-        ImGui::TextUnformatted("CascadeDepthPreview shader is unavailable.");
+        ImGui::TextUnformatted("No cascade preview captured.");
         return;
     }
 
-    ID3D11PixelShader *PixelShader = Program->PixelShader->GetShader();
+	char Text[128];
+	std::snprintf(Text, sizeof(Text), "%u cascades, preview %u x %u", Count, FRenderer::CascadePreviewResolution, FRenderer::CascadePreviewResolution);
 
-    ImGui::Text("%u cascades, %u x %u", Maps.GetCascadeCount(), Maps.GetResolution(), Maps.GetResolution());
+	const float TextWidth = ImGui::CalcTextSize(Text).x;
+	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - TextWidth));
+	ImGui::TextDisabled("%s", Text);
 
-    if (ImGui::BeginTable("CascadeImages", 2))
+    if (!ImGui::BeginTable("CascadeImages", 2))
+        return;
+
+    for (uint32 Index = 0; Index < Count; ++Index)
     {
-        for (uint32 Index = 0; Index < Maps.GetCascadeCount(); ++Index)
+        ImGui::TableNextColumn();
+        ImGui::Text("Cascade %u", Index);
+
+        const FTexture2D *Texture = Renderer->GetCascadePreviewTexture(Index);
+
+        if (!Texture || !Texture->GetSRV())
         {
-            ImGui::TableNextColumn();
-            ImGui::Text("Cascade %u", Index);
-
-            ID3D11ShaderResourceView *SRV = Maps.GetSliceSRV(Index);
-
-            if (!SRV)
-            {
-                ImGui::TextUnformatted("No depth resource.");
-                continue;
-            }
-
-            const float Size = std::max(1.0f, std::min(200.0f, ImGui::GetContentRegionAvail().x));
-
-            ImDrawList *DrawList = ImGui::GetWindowDrawList();
-
-            DrawList->AddCallback(BindCascadePreviewPS, PixelShader);
-
-            ImGui::Image(reinterpret_cast<ImTextureID>(SRV), ImVec2(Size, Size));
-
-            DrawList->AddCallback(UnbindCascadePreviewSRV);
-            DrawList->AddCallback(ImGui::GetPlatformIO().DrawCallback_ResetRenderState);
+            ImGui::TextUnformatted("No preview resource.");
+            continue;
         }
 
-        ImGui::EndTable();
+        const float Size = std::max(1.0f, std::min(static_cast<float>(FRenderer::CascadePreviewResolution), ImGui::GetContentRegionAvail().x));
+
+        ImGui::Image(reinterpret_cast<ImTextureID>(Texture->GetSRV()), ImVec2(Size, Size));
     }
+
+    ImGui::EndTable();
 }
 
 void UEditorEngine::DrawCSMSettingsContent()
