@@ -342,9 +342,16 @@ public:
 
     void CaptureCascadePreview();
 
-    const FCascadeShadowMaps &GetCascadePreviewMaps() const
+    static constexpr uint32 CascadePreviewResolution = 200;
+
+    uint32 GetCascadePreviewCount() const
     {
-        return CascadePreviewMaps;
+        return CascadePreviewCount;
+    }
+
+    const FTexture2D *GetCascadePreviewTexture(uint32 Index) const
+    {
+        return Index < CascadePreviewCount ? CascadePreviewTextures[Index].get() : nullptr;
     }
 
     // 변경 요청만 저장한다.
@@ -438,7 +445,10 @@ private:
     FCascadeShadowMaps CascadeShadowMaps;
     bool bCascadeDebugColors = false;
     bool bCascadeBlendEnabled = false;
-    FCascadeShadowMaps CascadePreviewMaps;
+    TUniquePtr<FTexture2D> CascadePreviewTextures[FCascadeShadowMaps::MaxCascades];
+    // 마지막으로 캡처한 이미지 개수
+    uint32 CascadePreviewCount = 0;
+    bool InitCascadePreviewResources();
     TUniquePtr<FConstantBuffer> CascadeDebugCB;
     void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
     void RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, EViewMode ViewMode);
