@@ -299,7 +299,7 @@ float Gather3X3(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float 
     return visibility /= 9.0f;
 }
 
-float Gather5X5(Texture2D<float> ShadowMap, float2 texelSize, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
+float Gather5X5(Texture2D<float> ShadowMap, float4 shadowPos, float bias, float invMapSize, float TransitionScale)
 {
     float visibility = 0;
     float recieveDepth = shadowPos.z - bias;
@@ -363,7 +363,7 @@ float ShadowFiltering2D(Texture2D<float> ShadowMap, float2 texelSize, float4 sha
             
         case SHADOW_QUALITY_EPIC:
         {
-            visibility = Gather5X5(ShadowMap, texelSize, shadowPos, bias, invMapSize, TransitionScale);
+            visibility = Gather5X5(ShadowMap, shadowPos, bias, invMapSize, TransitionScale);
             break;
         }
             
