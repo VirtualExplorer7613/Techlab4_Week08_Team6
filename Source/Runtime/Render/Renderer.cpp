@@ -108,15 +108,10 @@ bool FRenderer::Init()
     if (!ShadowRenderer->Init(2048))
         return false;
 
-    if (!CascadeShadowMaps.Init(2048, 4))
+    if (!RecreateCSMResources(CSMSettings))
     {
-        HTR_LOG(Error, "[CSM] Failed to create cascade depth maps.");
+        HTR_LOG(Error, "[CSM] Failed to create cascade resources.");
         return false;
-    }
-
-    for (uint32 Index = 0; Index < CascadeShadowMaps.GetCascadeCount(); ++Index)
-    {
-        RenderCommand::GetContext()->ClearDepthStencilView(CascadeShadowMaps.GetSliceDSV(Index), D3D11_CLEAR_DEPTH, 1.0f, 0);
     }
 
 	if (!CreateDynamicStructuredBuffer(sizeof(FPointLight), NUM_POINT_LIGHT, PointLightBuffer, PointLightSRV) || !CreateDynamicStructuredBuffer(sizeof(FSpotLight), NUM_SPOT_LIGHT, SpotLightBuffer, SpotLightSRV))
@@ -247,6 +242,17 @@ void FRenderer::RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &C
     RenderCommand::UpdateBufferData(ViewCB.get(), &CameraConstants, sizeof(FViewConstants));
 }
 
+void FRenderer::PrepareCascadeShadows(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic, EViewMode ViewMode)
+{
+    // CSM 비활성·직교 여부와 관계없이 설정 요청을 먼저 처리한다.
+    // 실패하면 기존 리소스를 유지하고 아래 계산을 계속한다.
+    ApplyPendingCSMSettings();
+
+    UpdateCascadeDebugConstants(Scene, CameraViewProjection, CameraForward, CameraNear, CameraFar, bOrthographic);
+
+    RenderCascadeShadowPreview(Scene, CameraViewProjection, CameraLocation, ViewMode);
+}
+
 void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic)
 {
     CascadeConstants = {};
@@ -281,13 +287,16 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
         CascadeConstants.InvResolution = 1.0f / static_cast<float>(Resolution);
 
         CascadeConstants.SplitDepths = FVector4(EndDepth);
+        CascadeConstants.BlendEndDepths = FVector4(EndDepth);
 
         const FVector4 &Direction = LightData.DirectionalLight.Direction;
         const FVector LightDirection(Direction.X, Direction.Y, Direction.Z);
         const auto CameraCorners = GetFrustumCornersWorld(CameraViewProjection);
 
         // 현재 분할 정책 E = 3;
-        constexpr float DistributionExponent = 3.0f;
+        //constexpr float DistributionExponent = 3.0f;
+
+        const float DistributionExponent = CSMDistributionExponent;
 
         float TotalWeight = 0.0f;
         float Weight = 1.0f;
@@ -485,6 +494,80 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene &Scene,const FMatrix &C
         }
     }
     RenderCommand::UpdateBufferData(CascadeDebugCB.get(), &CascadeConstants, sizeof(CascadeConstants));
+}
+
+/*void FRenderer::CaptureCascadePreview()
+{
+    // 직교 뷰, CSM 비활성, 깊이 패스 실패 시에는 복사하지 않는다.
+    if (!bCSMEnabled || CascadeConstants.CSMEnabled == 0 || CascadeConstants.CascadeCount == 0)
+    {
+        return;
+    }
+
+    const uint32 Resolution = CascadeShadowMaps.GetResolution();
+    const uint32 Count = CascadeShadowMaps.GetCascadeCount();
+
+    // 모든 Slice가 생성된 경우에만 배열 전체를 보존한다.
+    if (CascadeConstants.CascadeCount != Count)
+        return;
+
+     // 처음 필요한 시점에 생성한다. 해상도·개수가 바뀌면 재생성한다.
+    if (!CascadePreviewMaps.GetArraySRV() || CascadePreviewMaps.GetResolution() != Resolution || CascadePreviewMaps.GetCascadeCount() != Count)
+    {
+        if (!CascadePreviewMaps.Init(Resolution, Count))
+            return;
+    }
+
+    // 이전 UI 패스에서 미리보기 배열을 읽었던 슬롯을 해제한다.
+    RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+}*/
+
+void FRenderer::CaptureCascadePreview()
+{
+    // 새 CSM이 없으면 이전 미리보기를 유지한다.
+    if (!bCSMEnabled || CascadeConstants.CSMEnabled == 0 || CascadeConstants.CascadeCount == 0 ||
+        CascadeConstants.CascadeCount != CascadeShadowMaps.GetCascadeCount())
+    {
+        return;
+    }
+
+    // 미리보기 셰이더가 사용했던 t0 연결을 해제한다.
+    RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel);
+
+    CascadePreviewMaps.CopyFrom(CascadeShadowMaps);
+}
+
+bool FRenderer::RequestCSMSettings(uint32 Resolution, uint32 CascadeCount)
+{
+     const FCSMSettings Requested{Resolution, CascadeCount};
+
+    if (!Requested.IsValid())
+        return false;
+
+    // 여러 요청이 들어오면 마지막 요청을 사용한다.
+    PendingCSMSettings = Requested;
+
+     bHasPendingCSMSettings = Requested.Resolution != CSMSettings.Resolution || Requested.CascadeCount != CSMSettings.CascadeCount;
+
+    return true;
+}
+
+bool FRenderer::ApplyPendingCSMSettings()
+{
+    if (!bHasPendingCSMSettings)
+        return true;
+
+    const FCSMSettings Requested = PendingCSMSettings;
+    bHasPendingCSMSettings = false;
+
+    if (!RecreateCSMResources(Requested))
+    {
+        HTR_LOG(Warning, "[CSM] Failed to apply settings. Keeping existing resources.");
+
+        return false;
+    }
+
+    return true;
 }
 
 //void FRenderer::UpdateCascadeDebugConstants(const FVector &CameraForward)
@@ -1102,6 +1185,55 @@ void FRenderer::DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, E
     }
 
     bDepthOnly = false;
+}
+
+bool FRenderer::RecreateCSMResources(const FCSMSettings &NewSettings)
+{
+    ID3D11DeviceContext *Context = RenderCommand::GetContext();
+
+    if (!Context || !NewSettings.IsValid())
+        return false;
+
+    // 기존 리소스는 아직 변경하지 않는다.
+    FCascadeShadowMaps NewShadowMaps;
+    FCascadeShadowMaps NewPreviewMaps;
+
+    if (!NewShadowMaps.Init(NewSettings.Resolution, NewSettings.CascadeCount))
+    {
+        return false;
+    }
+
+    if (!NewPreviewMaps.Init(NewSettings.Resolution, NewSettings.CascadeCount))
+    {
+        return false;
+    }
+
+    // 새 리소스는 모두 생성되었음.
+    // 첫 캡처 전에도 미리보기를 표시할 수 있도록 초기화한다.
+    for (uint32 Index = 0; Index < NewSettings.CascadeCount; ++Index)
+    {
+        Context->ClearDepthStencilView(NewShadowMaps.GetSliceDSV(Index), D3D11_CLEAR_DEPTH, 1.0f, 0);
+
+        Context->ClearDepthStencilView(NewPreviewMaps.GetSliceDSV(Index), D3D11_CLEAR_DEPTH, 1.0f, 0);
+    }
+
+    // Init 또는 View의 CSM 준비 단계에서만 호출한다.
+    Context->OMSetRenderTargets(0, nullptr, nullptr);
+
+    RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+
+    RenderCommand::UnbindShaderResource(13, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+
+    // 두 생성이 모두 성공한 경우에만 기존 배열을 교체한다.
+    CascadeShadowMaps = std::move(NewShadowMaps);
+    CascadePreviewMaps = std::move(NewPreviewMaps);
+
+    CSMSettings = NewSettings;
+
+    // 새 설정에 맞는 상수는 이후 각 View에서 다시 계산한다.
+    CascadeConstants = {};
+
+    return true;
 }
 
 

@@ -139,6 +139,19 @@ struct alignas(16) FCascadeDebugConstants
 
 static_assert(sizeof(FCascadeDebugConstants) == 336, "FCascadeDebugConstants Size Error");
 
+struct FCSMSettings
+{
+    uint32 Resolution = 2048;
+    uint32 CascadeCount = 4;
+
+    bool IsValid() const
+    {
+        const bool bValidResolution = Resolution == 512 || Resolution == 1024 || Resolution == 2048 || Resolution == 4096;
+
+        return bValidResolution && CascadeCount >= 1 && CascadeCount <= FCascadeShadowMaps::MaxCascades;
+    }
+};
+
 class FRenderer
 {
 public:
@@ -277,8 +290,6 @@ public:
         return CascadeShadowMaps;
     }
 
-    void RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, EViewMode ViewMode);
-
     bool GetCascadeDebugColors() const
     {
         return bCascadeDebugColors;
@@ -291,7 +302,16 @@ public:
 
     void UpdateCascadeDebugConstants(const FVector &CameraForward);
 
-    void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
+    float GetCSMDistributionExponent() const
+    {
+        return CSMDistributionExponent;
+    }
+
+    void SetCSMDistributionExponent(float Value)
+    {
+        // UI 외부에서 변경해도 범위 보장
+        CSMDistributionExponent = Value < 0.1f ? 0.1f : (Value > 10.0f ? 10.0f : Value);
+    }
 
     void SetCSMEnabled(bool bEnabled)
     {
@@ -312,6 +332,24 @@ public:
     {
         bCascadeBlendEnabled = bEnabled;
     }
+
+    void CaptureCascadePreview();
+
+    const FCascadeShadowMaps &GetCascadePreviewMaps() const
+    {
+        return CascadePreviewMaps;
+    }
+
+    // 변경 요청만 저장한다.
+    bool RequestCSMSettings(uint32 Resolution, uint32 CascadeCount);
+
+    // 실제 적용된 설정을 반환한다.
+    const FCSMSettings &GetCSMSettings() const
+    {
+        return CSMSettings;
+    }
+
+    void PrepareCascadeShadows(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const FVector &CameraForward, float CameraNear, float CameraFar,bool bOrthographic, EViewMode ViewMode);
 
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
@@ -383,9 +421,20 @@ private:
     FCascadeDebugConstants CascadeConstants{};
     bool bCSMEnabled = true;
     float CSMShadowDistance = 40.0f;
+    float CSMDistributionExponent = 3.0f;
 
     FCascadeShadowMaps CascadeShadowMaps;
     bool bCascadeDebugColors = false;
     bool bCascadeBlendEnabled = false;
+    FCascadeShadowMaps CascadePreviewMaps;
     TUniquePtr<FConstantBuffer> CascadeDebugCB;
+    void UpdateCascadeDebugConstants(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraForward, float CameraNear, float CameraFar, bool bOrthographic);
+    void RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, EViewMode ViewMode);
+
+    // 렌더 패스를 시작하기 전에 요청을 적용한다.
+    bool ApplyPendingCSMSettings();
+    bool RecreateCSMResources(const FCSMSettings &NewSettings);
+    FCSMSettings CSMSettings;
+    FCSMSettings PendingCSMSettings;
+    bool bHasPendingCSMSettings = false;
 };
