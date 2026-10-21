@@ -288,10 +288,10 @@ float Gather5X5(Texture2DArray<float> ShadowMap, float slice, float4 shadowPos, 
     return visibility /= 25.0f;
 }
 
-float2 VogelDiskSample(int index, int count, float rotation)
+float2 VogelDiskSample(int index, int count)
 {
     float r = sqrt((index + 0.5) / count);
-    float theta = index * radians(137.50776f) + rotation; // 137.50776f = 황금각 (무리수)
+    float theta = index * radians(137.50776f); // 137.50776f = 황금각 (무리수)
 
     float s, c;
     sincos(theta, s, c);
@@ -320,7 +320,7 @@ bool BlockerSearch(Texture2DArray<float> ShadowMap, float slice, float4 shadowPo
     [unroll] // 루프를 펼쳐 Vogel 샘플 좌표를 컴파일 타임 상수로 계산
     for (int cycle = 0; cycle < PCSSBlockerSamples; cycle++)
     {
-        float2 offsetTexel = VogelDiskSample(cycle, PCSSBlockerSamples, 0) * searchTexel;
+        float2 offsetTexel = VogelDiskSample(cycle, PCSSBlockerSamples) * searchTexel;
 
         float2 sampleUV = shadowPos.xy + offsetTexel * invMapSize;
         sampleUV = ClampToShadowTile(sampleUV, AtlasScaleOffset, invMapSize);
@@ -370,7 +370,7 @@ float PCSSPCF(Texture2DArray<float> ShadowMap, float slice, float4 shadowPos, fl
     [unroll]
     for (int cycle = 0; cycle < PCSSFilterSamples; cycle++)
     {
-        float2 offsetTexel = VogelDiskSample(cycle, PCSSFilterSamples, 0) * PenumbraTexel;
+        float2 offsetTexel = VogelDiskSample(cycle, PCSSFilterSamples) * PenumbraTexel;
 
         float2 sampleUV = shadowPos.xy + offsetTexel * invMapSize;
         sampleUV = ClampToShadowTile(sampleUV, AtlasScaleOffset, invMapSize);
@@ -574,7 +574,7 @@ FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 n
 
 float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLightInfo info)
 {
-    if (bShowShadows == 0)
+    if (info.ShadowParameters.w == 0 || bReceiveShadow == 0 || info.AtlasScaleOffset.x <= 0.0f)
         return 1.0f;
     
     float4 shadowPos = mul(float4(worldPos, 1.0f), SpotLights[index].ViewProjection);
@@ -935,6 +935,8 @@ float3 ApplyCascadeDebugColor(float3 shadedColor, float3 worldPos, float3 normal
     return lerp(shadedColor, debugColor, shadowAmount);
 }
 
+
+
 struct VS_INPUT
 {
     float3 p : POSITION; // Input position from vertex buffer
@@ -1075,6 +1077,6 @@ float4 mainPS(PS_INPUT input) : SV_TARGET
     finalRGB = ACESFilmicToneMapping(finalRGB);
     finalRGB = pow(finalRGB, 1.0f / 2.2f);
 
-    finalRGB = ApplyCascadeDebugColor(finalRGB, input.worldPos, normal);    
+    finalRGB = ApplyCascadeDebugColor(finalRGB, input.worldPos, normal);
     return float4(finalRGB, alpha);
 }
