@@ -52,6 +52,21 @@ bool IsAABBInFrustum(const FAABB& Bounds, const FFrustumPlanes& Frustum)
     return true;
 }
 
+bool IsSphereInFrustum(const FVector& Center, float Radius, const FFrustumPlanes& Frustum)
+{
+    for (const FPlane& Plane : Frustum.Planes)
+    {
+        // 평면에서 구체 중심까지의 부호 있는 거리
+        const float Distance = Plane.Normal.X * Center.X + Plane.Normal.Y * Center.Y + Plane.Normal.Z * Center.Z + Plane.Distance;
+
+        // 구체 전체가 평면 바깥에 있으면 카메라 시야와 교차하지 않는다.
+        if (Distance < -Radius)
+            return false;
+    }
+
+    return true;
+}
+
 FAABB MakeWorldBounds(const FBox& Value)
 {
     const FVector Center = (Value.Min + Value.Max) * 0.5f;

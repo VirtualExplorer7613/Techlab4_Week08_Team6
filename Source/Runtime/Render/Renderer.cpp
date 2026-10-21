@@ -230,6 +230,13 @@ void FRenderer::RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &C
         Desc.Width = CascadeShadowMaps.GetResolution();
         Desc.Height = CascadeShadowMaps.GetResolution();
 
+        // Caster가 없는 Cascade는 깊이만 초기화하고 Shadow Draw를 생략한다.
+        if (CascadeShadowCasters[Index].IsEmpty() && Desc.DepthView && Desc.Width > 0 && Desc.Height > 0)
+        {
+            RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+            continue;
+        }
+
         if (!RenderShadowDepth(Scene, Desc, CascadeConstants.LightVP[Index], ViewMode, &CascadeShadowCasters[Index]))
         {
             // 일부 맵만 생성된 경우 일반 그림자
@@ -1774,6 +1781,8 @@ void FRenderer::RenderPointShadowMap(const FScene &Scene, const FMatrix &CameraV
 
 void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const float TanHalfFovY, const float ViewportHeight, const EViewMode ViewMode)
 {
+    const FFrustumPlanes CameraFrustum = ExtractFrustumPlanes(CameraViewProjection);
+
     FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetShadowMapAtlas() : nullptr;
     if (!ShadowMap || !ShadowMap->GetDSV())
     {
@@ -1812,8 +1821,9 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
 
     float CotanHalfFOV = 1.0f / TanHalfFovY;
 
-    // PointLight Loop
+    // Point Light Loop
     uint32 PointLightCount = LightData.PointLightCount;
+
     for(uint32 i = 0; i < PointLightCount; i++)
     {
         if(LightData.PointLights[i].ShadowParameters.W == 0.0f)
@@ -1821,11 +1831,22 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
             continue;
         }
 
+        // 광원의 영향 구체가 카메라 시야 밖이면 Shadow Atlas 할당을 생략한다.
+        const FVector4& PositionRadius = LightData.PointLights[i].PositionRadius;
+        const FVector LightPosition = { PositionRadius.X, PositionRadius.Y, PositionRadius.Z };
+
+        if (!IsSphereInFrustum(LightPosition, PositionRadius.W, CameraFrustum))
+        {
+            // 이전 프레임의 Atlas 좌표를 무효화한다.
+            for (uint32 Face = 0; Face < 6; ++Face)
+                LightData.PointLights[i].AtlasScaleOffset[Face] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+            continue;
+        }
+
         uint32 RequestSize = ShadowRenderer->GetShadowAtlasAllocator().GetMinTileSize();
         CalculateShadowMapLOD(LightData.PointLights[i].PositionRadius, CameraLocation, ViewportHeight, CotanHalfFOV, RequestSize);
         RequestSize = FMath::Clamp(RequestSize, ShadowRenderer->GetShadowAtlasAllocator().GetMinTileSize(), ShadowRenderer->GetShadowAtlasAllocator().GetAtlasSize());
-
-        FVector LightPosition = { LightData.PointLights[i].PositionRadius.X, LightData.PointLights[i].PositionRadius.Y, LightData.PointLights[i].PositionRadius.Z };
 
         const float Far = LightData.PointLights[i].PositionRadius.W;
         const float Near = LightData.PointLights[i].ShadowFilterParameters.W;
@@ -1930,8 +1951,18 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
             continue;
         }
 
-        uint32 RequestSize;
+        // Spot Light의 영향 범위를 구체로 보수적으로 검사한다.
+        const FVector4& PositionRadius = LightData.SpotLights[i].PositionRadius;
+        const FVector LightPosition = { PositionRadius.X, PositionRadius.Y, PositionRadius.Z };
 
+        if (!IsSphereInFrustum(LightPosition, PositionRadius.W, CameraFrustum))
+        {
+            // 이전 프레임의 Atlas 좌표를 무효화한다.
+            LightData.SpotLights[i].AtlasScaleOffset = { 0.0f, 0.0f, 0.0f, 0.0f };
+            continue;
+        }
+
+        uint32 RequestSize;
         CalculateShadowMapLOD(LightData.SpotLights[i].PositionRadius, CameraLocation, ViewportHeight, CotanHalfFOV, RequestSize);
 
         const float Far = LightData.SpotLights[i].PositionRadius.W;
