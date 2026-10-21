@@ -1057,14 +1057,26 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 	const bool bPrepass = MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Primitives) && (Settings.bTileBasedLightCulling || bLightCullingView) && ViewMode != EViewMode::Wireframe; //depth prepass를 할 것인가
 	const bool bTileCull = bPrepass && (IsPerPixelLit(ViewMode) || bLightCullingView); //라이트 컬링을 할 것인가
 
+	// 현재 View에 그림자를 받을 수 있는 객체가 있는지 확인한다.
+	bool bHasVisibleShadowReceiver = false;
+
+	for (const FRenderPacket& Packet : RenderQueue)
+	{
+		// Proxy가 없는 별도 렌더링 객체는 안전하게 Receiver 후보로 남긴다.
+		if (!Packet.Proxy || Packet.Proxy->GetReceiveShadows())
+		{
+			bHasVisibleShadowReceiver = true;
+			break;
+		}
+	}
+
 	//0. 정렬
 	if (MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Primitives))
 		Renderer->RenderQueueSorting(RenderQueue, ViewProjection, ViewCameraLocation);
     
     const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
-
     const bool bRenderShadows = ViewMode != EViewMode::Unlit && MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Shadows);
-    Renderer->SetShadowsEnabled(bRenderShadows);
+	Renderer->SetShadowsEnabled(bRenderShadows && bHasVisibleShadowReceiver);
 
     if (bRenderShadows)
     {
@@ -1079,22 +1091,24 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 		const float TanHalfFovX = 1.0f / CameraProjection.M[1][0];
 		const float TanHalfFovY = 1.0f / CameraProjection.M[2][1];
 
-        {
-            SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowCSM);
+		if (bHasVisibleShadowReceiver)
+		{
+			{
+				SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowCSM);
+				Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
+			}
 
-            Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
-        }
-
-        // CSM이 정상적으로 생성됐다면 중복되는 일반 Directional Shadow Pass를 생략한다.
-        if (!Renderer->IsCSMActive())
-        {
-            SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowDirectional);
-            Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
-        }
+			// CSM이 정상적으로 생성됐다면 중복되는 일반 Directional Shadow Pass를 생략한다.
+			if (!Renderer->IsCSMActive())
+			{
+				SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowDirectional);
+				Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
+			}
+		}
 
         {
             SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowAtlas);
-			Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, TanHalfFovY, MultipleViewportsAdapter.GetViewRect(ViewIndex).Height, ViewMode);
+			Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, TanHalfFovY, MultipleViewportsAdapter.GetViewRect(ViewIndex).Height, ViewMode, MultipleViewportsAdapter.IsOrthographic(ViewIndex));
         }
 
 		ViewWorld.GetScene().PostUpdateLightComponents(Renderer);
