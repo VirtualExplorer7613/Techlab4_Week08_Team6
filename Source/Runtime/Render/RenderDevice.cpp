@@ -346,10 +346,5 @@ void FRenderDevice::CreateStates()
             Desc.BorderColor[i] = 1.0f;
 
         Device->CreateSamplerState(&Desc, SamplerStates[(uint8)ESamplerState::PointBorder].GetAddressOf());
-
-        Desc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
-        Desc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
-
-        Device->CreateSamplerState(&Desc, SamplerStates[(uint8)ESamplerState::LinearComparison].GetAddressOf());
 	}
 }

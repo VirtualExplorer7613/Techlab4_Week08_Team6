@@ -198,6 +198,26 @@ void RenderCommand::BindShaderResource(uint32 Slot, FTexture2D* Texture2D, EShad
 	}
 }
 
+void RenderCommand::BindShaderResourceArray(uint32 Slot, FTexture2D* Texture2D, EShaderBindFlagBits FlagBits) // 1장짜리 array용
+{
+	ID3D11ShaderResourceView* SRV = Texture2D ? Texture2D->GetArraySRV() : nullptr;
+	if (!SRV)
+	{
+		UnbindShaderResource(Slot, FlagBits);
+		return;
+	}
+
+	if (HasFlag(FlagBits, EShaderBindFlagBits::Vertex))
+	{
+		RenderDevice->GetContext()->VSSetShaderResources(Slot, 1, &SRV);
+	}
+
+	if (HasFlag(FlagBits, EShaderBindFlagBits::Pixel))
+	{
+		RenderDevice->GetContext()->PSSetShaderResources(Slot, 1, &SRV);
+	}
+}
+
 void RenderCommand::BindShaderResource(uint32 Slot, UTexture2D* Texture2D, EShaderBindFlagBits FlagBits)
 {
 	FTexture2D* Resource = Texture2D ? Texture2D->GetResource() : nullptr;

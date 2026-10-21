@@ -1070,6 +1070,7 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
     {
         Renderer->SetShadowQuality(Settings.ShadowQuality);
 		Renderer->SetShadowResolutionQuality(static_cast<EShadowResolutionQuality>(Settings.ShadowResolutionQuality));
+		Renderer->SetPCSSMaxKernel(Settings.PCSSMaxKernel);
         Renderer->SetTransitionFactor(Settings.TransitionFactor);
 
 		const FMatrix CameraWorld = MultipleViewportsAdapter.GetEngineViewMatrix(ViewIndex).Inverse();
