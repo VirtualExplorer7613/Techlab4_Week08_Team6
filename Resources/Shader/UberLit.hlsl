@@ -141,7 +141,8 @@ cbuffer CascadeDebugConstants : register(b5)
     uint CascadeBlendEnabled;
     uint2 CascadePadding;
 
-    float4 CascadeBiasScale; // X/Y/Z/W: Cascade 0/1/2/3 bias scale
+    float4 CascadeBiasScale; // X/Y/Z/W: per-cascade UI bias to normalized depth scale
+    float4 CascadeBiasOffset; // Per-cascade texel bias in normalized depth units
 };
 
 #define TILE_SIZE 16
@@ -709,6 +710,11 @@ float4 DirectionalPCSSParams(float4x4 lightVP, float invResolution, float tanHal
     return float4(depthRange * tanHalfAngle * texelPerWorld, 0.0f, 0.0f, 0.0f);
 }
 
+float CalculateCascadeBias(float baseBias, uint index)
+{
+    return baseBias * CascadeBiasScale[index] + CascadeBiasOffset[index];
+}
+
 // Cascade 보간
 float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentVisibility, float bias)
 {
@@ -744,7 +750,7 @@ float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentV
 
     float2 texelSize = float2(CascadeInvResolution, CascadeInvResolution);
     
-    float nextBias = bias * CascadeBiasScale[nextIndex];
+    float nextBias = CalculateCascadeBias(bias, nextIndex);
 
     float4 pcssParams = DirectionalPCSSParams(CascadeLightVP[nextIndex], CascadeInvResolution, DirectionalLight.ShadowFilterParameters.z);
     float nextVisibility = ShadowFiltering2D(CascadeShadowMap, (float) nextIndex, nextPos, nextBias, CascadeInvResolution, DirectionalLight.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
@@ -802,7 +808,7 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLig
 
     if (useCascade)
     {
-        float cascadeBias = bias * CascadeBiasScale[cascadeIndex];
+        float cascadeBias = CalculateCascadeBias(bias, cascadeIndex);
         float4 pcssParams = DirectionalPCSSParams(CascadeLightVP[cascadeIndex], invResolution, info.ShadowFilterParameters.z);
         visibility = ShadowFiltering2D(CascadeShadowMap, (float) cascadeIndex, shadowPos, cascadeBias, invResolution, info.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
         visibility = ApplyCascadeShadowBlend(worldPos, cascadeIndex, visibility, bias);

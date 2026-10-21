@@ -601,9 +601,10 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& 
         // 캐스케이드마다 하나씩 LightVP를 만든다.
         // Count가 4라면 Index는 0, 1, 2, 3.
 
-        // 기존 UI Bias의 기준: 현재 프레임의 Cascade 0, 해상도 2048.
-        constexpr float ReferenceResolution = 2048.0f;
-        float ReferenceNormalizedTexelSize = 0.0f;
+        // UI Bias를 고정된 월드 거리로 환산한다. 다른 Cascade의 깊이 범위를 참조하지 않는다.
+        constexpr float UIBiasToWorld = 1.0f;
+        // 기본 거리 보정부터 사용하며, 필요하면 텍셀 비례 추가량을 조정한다.
+        constexpr float TexelBiasAmount = 0.0f;
 
         const auto GetNormalizedTexelSize = [](const FMatrix& LightVP, float MapResolution) -> float
         {
@@ -804,16 +805,16 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& 
 
             const FMatrix& FinalLightVP = CascadeConstants.LightVP[Index];
 
-            // Cascade 0의 최종 행렬을 사용하되,
-            // 기준 해상도는 실제 설정과 관계없이 2048로 고정한다.
-            if (Index == 0)
-            {
-                ReferenceNormalizedTexelSize =  GetNormalizedTexelSize(FinalLightVP, ReferenceResolution);
-            }
+            const FVector DepthColumn(
+                FinalLightVP.M[0][2],
+                FinalLightVP.M[1][2],
+                FinalLightVP.M[2][2]);
 
-            const float NormalizedTexelSize = GetNormalizedTexelSize(FinalLightVP, static_cast<float>(Resolution));
-
-            CascadeConstants.BiasScale[Index] = ReferenceNormalizedTexelSize > 0.0f ? NormalizedTexelSize / ReferenceNormalizedTexelSize : 1.0f;
+            // 직교 투영의 깊이 열 길이 = 1 / (Far - Near).
+            const float InvDepthRange = DepthColumn.Size();
+            CascadeConstants.BiasScale[Index] = UIBiasToWorld * InvDepthRange;
+            CascadeConstants.BiasOffset[Index] = TexelBiasAmount *
+                GetNormalizedTexelSize(FinalLightVP, static_cast<float>(Resolution));
 
             SplitNear = SplitFar;
             Weight *= DistributionExponent;
