@@ -239,7 +239,7 @@ void FRenderDevice::CreateStates()
 
         // Shadow Map 기록 시 표면 기울기에 비례해 깊이 오프셋을 적용한다.
         Desc.FillMode = D3D11_FILL_SOLID;
-        Desc.CullMode = D3D11_CULL_BACK;
+        Desc.CullMode = D3D11_CULL_NONE;
         Desc.DepthBias = 128;
         Desc.SlopeScaledDepthBias = 1.0f;
         Desc.DepthBiasClamp = 0.0f;
