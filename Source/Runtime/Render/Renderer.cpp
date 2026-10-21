@@ -230,6 +230,13 @@ void FRenderer::RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &C
         Desc.Width = CascadeShadowMaps.GetResolution();
         Desc.Height = CascadeShadowMaps.GetResolution();
 
+        // Caster가 없는 Cascade는 깊이만 초기화하고 Shadow Draw를 생략한다.
+        if (CascadeShadowCasters[Index].IsEmpty() && Desc.DepthView && Desc.Width > 0 && Desc.Height > 0)
+        {
+            RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+            continue;
+        }
+
         if (!RenderShadowDepth(Scene, Desc, CascadeConstants.LightVP[Index], ViewMode, &CascadeShadowCasters[Index]))
         {
             // 일부 맵만 생성된 경우 일반 그림자
@@ -601,6 +608,39 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& 
         // 캐스케이드마다 하나씩 LightVP를 만든다.
         // Count가 4라면 Index는 0, 1, 2, 3.
 
+        // UI Bias를 고정된 월드 거리로 환산한다. 다른 Cascade의 깊이 범위를 참조하지 않는다.
+        constexpr float UIBiasToWorld = 1.0f;
+        // 기본 거리 보정부터 사용하며, 필요하면 텍셀 비례 추가량을 조정한다.
+        constexpr float TexelBiasAmount = 0.0f;
+
+        const auto GetNormalizedTexelSize = [](const FMatrix& LightVP, float MapResolution) -> float
+        {
+            // 행 벡터 방식이므로 각 "열"의 XYZ 길이를 사용한다.
+            const FVector WidthColumn(
+                LightVP.M[0][0],
+                LightVP.M[1][0],
+                LightVP.M[2][0]);
+
+            const FVector DepthColumn(
+                LightVP.M[0][2],
+                LightVP.M[1][2],
+                LightVP.M[2][2]);
+
+            const float WidthScale = WidthColumn.Size(); // 투영 폭
+            const float DepthScale = DepthColumn.Size(); // 깊이 범위
+
+            if (WidthScale <= 0.0f || DepthScale <= 0.0f || MapResolution <= 0.0f)
+            {
+                return 0.0f;
+            }
+
+            const float ProjectionWidth = 2.0f / WidthScale;
+            const float DepthRange = 1.0f / DepthScale;
+            const float WorldTexelSize = ProjectionWidth / MapResolution;
+
+            return WorldTexelSize / DepthRange;
+        };
+
         for (uint32 Index = 0; Index < Count; ++Index)
         {
             // ──────────────────────
@@ -769,6 +809,19 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& 
 
             // CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution, MinCasterDepth);
             CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution, MinCasterDepth, StableRadius);
+
+            const FMatrix& FinalLightVP = CascadeConstants.LightVP[Index];
+
+            const FVector DepthColumn(
+                FinalLightVP.M[0][2],
+                FinalLightVP.M[1][2],
+                FinalLightVP.M[2][2]);
+
+            // 직교 투영의 깊이 열 길이 = 1 / (Far - Near).
+            const float InvDepthRange = DepthColumn.Size();
+            CascadeConstants.BiasScale[Index] = UIBiasToWorld * InvDepthRange;
+            CascadeConstants.BiasOffset[Index] = TexelBiasAmount *
+                GetNormalizedTexelSize(FinalLightVP, static_cast<float>(Resolution));
 
             SplitNear = SplitFar;
             Weight *= DistributionExponent;
@@ -1686,8 +1739,15 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
     Desc.Width = ShadowMap->GetWidth();
     Desc.Height = ShadowMap->GetHeight();
 
-    if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode, bOrthographic ? nullptr : &ShadowCasters))
+    // Perspective 뷰에서 Caster가 없으면 Depth만 초기화한다.
+    if (!bOrthographic && ShadowCasters.IsEmpty())
+    {
+        RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+    }
+    else if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode, bOrthographic ? nullptr : &ShadowCasters))
+    {
         return;
+    }
 
     // Shadow Map 생성과 샘플링에 동일한 Light VP를 사용한다.
     UploadLightGlobalConstants(LightVP);
@@ -1771,6 +1831,8 @@ void FRenderer::RenderPointShadowMap(const FScene &Scene, const FMatrix &CameraV
 
 void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const float TanHalfFovY, const float ViewportHeight, const EViewMode ViewMode)
 {
+    const FFrustumPlanes CameraFrustum = ExtractFrustumPlanes(CameraViewProjection);
+
     FTexture2D *ShadowMap = ShadowRenderer ? ShadowRenderer->GetShadowMapAtlas() : nullptr;
     if (!ShadowMap || !ShadowMap->GetDSV())
     {
@@ -1778,6 +1840,54 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
     }
 
     RenderCommand::UnbindShaderResource(14, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // ShadowMapAtlasBuffer
+
+    // 카메라 시야에 영향을 주는 그림자 광원이 없으면 Shadow Atlas Pass 전체를 생략한다.
+    bool bHasVisibleShadowCastingLight = false;
+
+    for (uint32 i = 0; i < LightData.PointLightCount; ++i)
+    {
+        FPointLight& PointLightData = LightData.PointLights[i];
+
+        if (PointLightData.ShadowParameters.W <= 0.0f)
+            continue;
+
+        const FVector4& PositionRadius = PointLightData.PositionRadius;
+        if (IsSphereInFrustum(FVector(PositionRadius.X, PositionRadius.Y, PositionRadius.Z), PositionRadius.W, CameraFrustum))
+        {
+            bHasVisibleShadowCastingLight = true;
+        }
+        else 
+        {
+            for (uint32 Face = 0; Face < 6; ++Face)
+                PointLightData.AtlasScaleOffset[Face] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        }
+    }
+
+    for (uint32 i = 0; i < LightData.SpotLightCount; ++i)
+    {
+        FSpotLight& SpotLightData = LightData.SpotLights[i];
+
+        if (SpotLightData.ShadowParameters.W <= 0.0f)
+            continue;
+
+        const FVector4& PositionRadius = SpotLightData.PositionRadius;
+        if (IsSphereInFrustum(FVector(PositionRadius.X, PositionRadius.Y, PositionRadius.Z), PositionRadius.W, CameraFrustum))
+        {
+            bHasVisibleShadowCastingLight = true;
+        }
+        else
+        {
+            SpotLightData.AtlasScaleOffset = { 0.0f, 0.0f, 0.0f, 0.0f };
+        }
+    }
+
+    if (!bHasVisibleShadowCastingLight)
+    {
+        // Shadow Pass는 생략하더라도 일반 조명 계산에 필요한 GPU 데이터는 갱신한다.
+        ::UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
+        ::UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight) * LightData.PointLightCount);
+        return;
+    }
 
     ShadowRenderer->GetShadowAtlasAllocator().Reset();
 
@@ -1792,8 +1902,9 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
 
     float CotanHalfFOV = 1.0f / TanHalfFovY;
 
-    // PointLight Loop
+    // Point Light Loop
     uint32 PointLightCount = LightData.PointLightCount;
+
     for(uint32 i = 0; i < PointLightCount; i++)
     {
         if(LightData.PointLights[i].ShadowParameters.W == 0.0f)
@@ -1801,10 +1912,22 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
             continue;
         }
 
-        uint32 RequestSize;
-        CalculateShadowMapLOD(LightData.PointLights[i].PositionRadius, CameraLocation, ViewportHeight, CotanHalfFOV, RequestSize);
+        // 광원의 영향 구체가 카메라 시야 밖이면 Shadow Atlas 할당을 생략한다.
+        const FVector4& PositionRadius = LightData.PointLights[i].PositionRadius;
+        const FVector LightPosition = { PositionRadius.X, PositionRadius.Y, PositionRadius.Z };
 
-        FVector LightPosition = { LightData.PointLights[i].PositionRadius.X, LightData.PointLights[i].PositionRadius.Y, LightData.PointLights[i].PositionRadius.Z };
+        if (!IsSphereInFrustum(LightPosition, PositionRadius.W, CameraFrustum))
+        {
+            // 이전 프레임의 Atlas 좌표를 무효화한다.
+            for (uint32 Face = 0; Face < 6; ++Face)
+                LightData.PointLights[i].AtlasScaleOffset[Face] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+            continue;
+        }
+
+        uint32 RequestSize = ShadowRenderer->GetShadowAtlasAllocator().GetMinTileSize();
+        CalculateShadowMapLOD(LightData.PointLights[i].PositionRadius, CameraLocation, ViewportHeight, CotanHalfFOV, RequestSize);
+        RequestSize = FMath::Clamp(RequestSize, ShadowRenderer->GetShadowAtlasAllocator().GetMinTileSize(), ShadowRenderer->GetShadowAtlasAllocator().GetAtlasSize());
 
         const float Far = LightData.PointLights[i].PositionRadius.W;
         const float Near = LightData.PointLights[i].ShadowFilterParameters.W;
@@ -1817,6 +1940,19 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
         {
             while(true)
             {
+                // Point Light는 타일 전체에 렌더하고 투영 함수 내부에서 border를 반영한다.
+                FMatrix FaceVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, RequestSize, face);
+
+                TArray<FPrimitiveSceneProxy*> ShadowCasters;
+                GatherShadowCasters(Scene, FaceVP, FrustumAllPlanesMask, ShadowCasters);
+
+                // 해당 방향에 Caster가 없다면 Atlas 타일을 할당하지 않는다.
+                if (ShadowCasters.IsEmpty())
+                {
+                    LightData.PointLights[i].AtlasScaleOffset[face] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                    break;
+                }
+
                 bool bHasAllocated = ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile);
 
                 if(bHasAllocated)
@@ -1827,19 +1963,29 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
 
                     ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
 
-                    FMatrix FaceVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, InnerSize, face);
+                    if (InnerSize != RequestSize)
+                    {
+                        FaceVP = ShadowRenderer->BuildPointLightVP(LightPosition, Near, Far, InnerSize, face);
+                        ShadowCasters.Reset();
+                        GatherShadowCasters(Scene, FaceVP, FrustumAllPlanesMask, ShadowCasters);
+                    }
+
                     LightData.PointLights[i].ViewProjection[face] = FaceVP;
                     LightData.PointLights[i].AtlasScaleOffset[face] = { (float)InnerSize / AtlasSize, (float)InnerSize / AtlasSize, (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; //UV
                     LightData.PointLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
-                    TArray<FPrimitiveSceneProxy*> ShadowCasters;
-                    GatherShadowCasters(Scene, FaceVP, FrustumAllPlanesMask, ShadowCasters);
                     DrawShadowCasters(Scene, FaceVP, ViewMode, &ShadowCasters);
 
                     break;
                 }
                 else
                 {
+                    if (RequestSize / 2 >= ShadowRenderer->GetShadowAtlasAllocator().GetMinTileSize())
+                    {
+                        RequestSize /= 2;
+                        continue;
+                    }
+
                     bHasChangedRequestSize = true;
                     break;
                 }
@@ -1886,12 +2032,33 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
             continue;
         }
 
-        uint32 RequestSize;
+        // Spot Light의 영향 범위를 구체로 보수적으로 검사한다.
+        const FVector4& PositionRadius = LightData.SpotLights[i].PositionRadius;
+        const FVector LightPosition = { PositionRadius.X, PositionRadius.Y, PositionRadius.Z };
 
+        if (!IsSphereInFrustum(LightPosition, PositionRadius.W, CameraFrustum))
+        {
+            // 이전 프레임의 Atlas 좌표를 무효화한다.
+            LightData.SpotLights[i].AtlasScaleOffset = { 0.0f, 0.0f, 0.0f, 0.0f };
+            continue;
+        }
+
+        uint32 RequestSize;
         CalculateShadowMapLOD(LightData.SpotLights[i].PositionRadius, CameraLocation, ViewportHeight, CotanHalfFOV, RequestSize);
 
         const float Far = LightData.SpotLights[i].PositionRadius.W;
         const float Near = 0.1f;
+
+        const FMatrix& LightVP = LightData.SpotLights[i].ViewProjection;
+        TArray<FPrimitiveSceneProxy*> ShadowCasters;
+        GatherShadowCasters(Scene, LightVP, FrustumAllPlanesMask, ShadowCasters);
+
+        // Caster가 없으면 Atlas 타일을 할당하지 않고 다음 Spot Light로 넘어간다.
+        if (ShadowCasters.IsEmpty())
+        {
+            LightData.SpotLights[i].AtlasScaleOffset = { 0.0f, 0.0f, 0.0f, 0.0f };
+            continue;
+        }
 
         FShadowAtlasTile ShadowAtlasTile;
 
@@ -1899,7 +2066,7 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
         {
             bool bHasAllocated = ShadowRenderer->GetShadowAtlasAllocator().Allocate(RequestSize, ShadowAtlasTile);
 
-            if(bHasAllocated)
+            if (bHasAllocated)
             {
                 uint32 InnerX = ShadowAtlasTile.X + SHADOW_ATLAS_BORDER;
                 uint32 InnerY = ShadowAtlasTile.Y + SHADOW_ATLAS_BORDER;
@@ -1910,24 +2077,19 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
                 LightData.SpotLights[i].AtlasScaleOffset = { (float)InnerSize / AtlasSize , (float)InnerSize / AtlasSize , (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; // UV
                 LightData.SpotLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
-                const FMatrix& LightVP = LightData.SpotLights[i].ViewProjection;
-
-                TArray<FPrimitiveSceneProxy*> ShadowCasters;
-                GatherShadowCasters(Scene, LightVP, FrustumAllPlanesMask, ShadowCasters);
                 DrawShadowCasters(Scene, LightVP, ViewMode, &ShadowCasters);
-
                 break;
             }
             else
             {
-                if(RequestSize / 2 >= ShadowRenderer->GetShadowAtlasAllocator().GetMinTileSize())
+                if (RequestSize / 2 >= ShadowRenderer->GetShadowAtlasAllocator().GetMinTileSize())
                 {
                     RequestSize /= 2;
                     continue;
                 }
                 else
                 {
-                    LightData.SpotLights[i].AtlasScaleOffset = { 0.0f,0.0f,0.0f,0.0f };                    
+                    LightData.SpotLights[i].AtlasScaleOffset = { 0.0f, 0.0f, 0.0f, 0.0f };
                     break;
                 }
             }

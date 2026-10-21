@@ -72,9 +72,9 @@
                             "Properties": {
                                 "Transform": {
                                     "Location": {
-                                        "X": -1.5,
-                                        "Y": -2.0,
-                                        "Z": 0.5
+                                        "X": -3.608729839324951,
+                                        "Y": -7.446804046630859,
+                                        "Z": 2.740079164505005
                                     },
                                     "Rotation": {
                                         "Pitch": 0.0,
@@ -83,8 +83,8 @@
                                     },
                                     "Scale": {
                                         "X": 1.0,
-                                        "Y": 1.0,
-                                        "Z": 1.0
+                                        "Y": 0.8369669914245605,
+                                        "Z": 5.4678144454956055
                                     }
                                 }
                             }
@@ -190,124 +190,6 @@
                             "Properties": {
                                 "Transform": {
                                     "Location": {
-                                        "X": 0.0,
-                                        "Y": 0.0,
-                                        "Z": 1.0
-                                    },
-                                    "Rotation": {
-                                        "Pitch": 0.0,
-                                        "Roll": 0.0,
-                                        "Yaw": 0.0
-                                    },
-                                    "Scale": {
-                                        "X": 0.6000000238418579,
-                                        "Y": 0.6000000238418579,
-                                        "Z": 2.0
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            "Class": "UStaticMeshComponent",
-                            "Name": "UStaticMeshComponent",
-                            "OverrideMaterials": [],
-                            "Parent": "DefaultSceneRoot",
-                            "Properties": {
-                                "StaticMesh": "Cylinder",
-                                "Transform": {
-                                    "Location": {
-                                        "X": 0.0,
-                                        "Y": 0.0,
-                                        "Z": 0.0
-                                    },
-                                    "Rotation": {
-                                        "Pitch": 0.0,
-                                        "Roll": 0.0,
-                                        "Yaw": 0.0
-                                    },
-                                    "Scale": {
-                                        "X": 1.0,
-                                        "Y": 1.0,
-                                        "Z": 1.0
-                                    }
-                                },
-                                "bCastShadows": true,
-                                "bReceiveShadows": true,
-                                "bVisible": true
-                            }
-                        }
-                    ],
-                    "Properties": {}
-                },
-                {
-                    "Class": "AStaticMeshActor",
-                    "Components": [
-                        {
-                            "Class": "USceneComponent",
-                            "Name": "DefaultSceneRoot",
-                            "Parent": "",
-                            "Properties": {
-                                "Transform": {
-                                    "Location": {
-                                        "X": 3.0,
-                                        "Y": 0.0,
-                                        "Z": 1.5
-                                    },
-                                    "Rotation": {
-                                        "Pitch": 0.0,
-                                        "Roll": 0.0,
-                                        "Yaw": 0.0
-                                    },
-                                    "Scale": {
-                                        "X": 0.4000000059604645,
-                                        "Y": 0.4000000059604645,
-                                        "Z": 3.0
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            "Class": "UStaticMeshComponent",
-                            "Name": "UStaticMeshComponent",
-                            "OverrideMaterials": [],
-                            "Parent": "DefaultSceneRoot",
-                            "Properties": {
-                                "StaticMesh": "Cube",
-                                "Transform": {
-                                    "Location": {
-                                        "X": 0.0,
-                                        "Y": 0.0,
-                                        "Z": 0.0
-                                    },
-                                    "Rotation": {
-                                        "Pitch": 0.0,
-                                        "Roll": 0.0,
-                                        "Yaw": 0.0
-                                    },
-                                    "Scale": {
-                                        "X": 1.0,
-                                        "Y": 1.0,
-                                        "Z": 1.0
-                                    }
-                                },
-                                "bCastShadows": true,
-                                "bReceiveShadows": true,
-                                "bVisible": true
-                            }
-                        }
-                    ],
-                    "Properties": {}
-                },
-                {
-                    "Class": "AStaticMeshActor",
-                    "Components": [
-                        {
-                            "Class": "USceneComponent",
-                            "Name": "DefaultSceneRoot",
-                            "Parent": "",
-                            "Properties": {
-                                "Transform": {
-                                    "Location": {
                                         "X": -1.5,
                                         "Y": 2.0,
                                         "Z": 0.6000000238418579
@@ -368,7 +250,7 @@
                                 "Transform": {
                                     "Location": {
                                         "X": 1.5,
-                                        "Y": 2.0,
+                                        "Y": 3.8597464561462402,
                                         "Z": 0.10000000149011612
                                     },
                                     "Rotation": {
@@ -485,9 +367,9 @@
                             "Properties": {
                                 "Transform": {
                                     "Location": {
-                                        "X": -1.600000023841858,
-                                        "Y": -0.6000000238418579,
-                                        "Z": 5.599999904632568
+                                        "X": -1.59565269947052,
+                                        "Y": -4.74171781539917,
+                                        "Z": 2.268613338470459
                                     },
                                     "Rotation": {
                                         "Pitch": 0.0,
@@ -544,8 +426,8 @@
                             "Properties": {
                                 "Transform": {
                                     "Location": {
-                                        "X": -4.5,
-                                        "Y": 0.0,
+                                        "X": -6.517761707305908,
+                                        "Y": -3.4676642417907715,
                                         "Z": 8.5
                                     },
                                     "Rotation": {
@@ -604,7 +486,7 @@
                                 "Transform": {
                                     "Location": {
                                         "X": 10.0,
-                                        "Y": 0.0,
+                                        "Y": 2.708807945251465,
                                         "Z": 0.5
                                     },
                                     "Rotation": {
@@ -694,6 +576,7 @@
                                 },
                                 "NearPlane": 10.0,
                                 "ShadowDepthBias": 0.0,
+                                "ShadowSharpen": 0.0,
                                 "ShadowSlopeBias": 0.0,
                                 "Transform": {
                                     "Location": {
@@ -789,9 +672,11 @@
                                     "Y": 1.0,
                                     "Z": 1.0
                                 },
+                                "LightSourceAngle": 1.0,
                                 "NearPlane": 1.0,
-                                "ShadowDepthBias": 0.0,
-                                "ShadowSlopeBias": 0.0,
+                                "ShadowDepthBias": 0.0020000000949949026,
+                                "ShadowSharpen": 0.0,
+                                "ShadowSlopeBias": 0.004999999888241291,
                                 "Transform": {
                                     "Location": {
                                         "X": 0.0,
@@ -869,6 +754,65 @@
                                 },
                                 "bCastShadows": false,
                                 "bReceiveShadows": false,
+                                "bVisible": true
+                            }
+                        }
+                    ],
+                    "Properties": {}
+                },
+                {
+                    "Class": "AStaticMeshActor",
+                    "Components": [
+                        {
+                            "Class": "USceneComponent",
+                            "Name": "DefaultSceneRoot",
+                            "Parent": "",
+                            "Properties": {
+                                "Transform": {
+                                    "Location": {
+                                        "X": 0.0,
+                                        "Y": 0.0,
+                                        "Z": 2.5020368099212646
+                                    },
+                                    "Rotation": {
+                                        "Pitch": 0.0,
+                                        "Roll": 0.0,
+                                        "Yaw": 0.0
+                                    },
+                                    "Scale": {
+                                        "X": 1.0,
+                                        "Y": 1.0,
+                                        "Z": 1.0
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Class": "UStaticMeshComponent",
+                            "Name": "UStaticMeshComponent",
+                            "OverrideMaterials": [],
+                            "Parent": "DefaultSceneRoot",
+                            "Properties": {
+                                "StaticMesh": "Cylinder",
+                                "Transform": {
+                                    "Location": {
+                                        "X": 0.0,
+                                        "Y": 0.0,
+                                        "Z": -0.4469369649887085
+                                    },
+                                    "Rotation": {
+                                        "Pitch": 0.0,
+                                        "Roll": 0.0,
+                                        "Yaw": 0.0
+                                    },
+                                    "Scale": {
+                                        "X": 1.0,
+                                        "Y": 1.0,
+                                        "Z": 4.0
+                                    }
+                                },
+                                "bCastShadows": true,
+                                "bReceiveShadows": true,
                                 "bVisible": true
                             }
                         }

@@ -1079,7 +1079,14 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 		const float TanHalfFovX = 1.0f / CameraProjection.M[1][0];
 		const float TanHalfFovY = 1.0f / CameraProjection.M[2][1];
 
+        {
+            SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowCSM);
 
+            Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
+        }
+
+        // CSM이 정상적으로 생성됐다면 중복되는 일반 Directional Shadow Pass를 생략한다.
+        if (!Renderer->IsCSMActive())
         {
             SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowDirectional);
             Renderer->RenderDirectionalShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
@@ -1090,12 +1097,7 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 			Renderer->RenderShadowMap(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, TanHalfFovY, MultipleViewportsAdapter.GetViewRect(ViewIndex).Height, ViewMode);
         }
 
-        {
-            SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowCSM);
-
-            Renderer->PrepareCascadeShadows(ViewWorld.GetScene(), ViewProjection, ViewCameraLocation, ViewCameraForward, Projection.NearClip, Projection.FarClip, MultipleViewportsAdapter.IsOrthographic(ViewIndex), ViewMode, CameraWorld, TanHalfFovX, TanHalfFovY);
-        }
-		ViewWorld.GetScene().PostUpdateLightComponents(Renderer);    	
+		ViewWorld.GetScene().PostUpdateLightComponents(Renderer);
 
         if (ViewIndex == MultipleViewportsAdapter.GetEditorViewIndex())
         {
