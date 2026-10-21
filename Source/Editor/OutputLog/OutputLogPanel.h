@@ -4,6 +4,7 @@
 #include "Editor/EditorUI/EditorPanel.h"
 #include "Core/EngineLog.h"
 
+class FRenderer;
 
 
 struct FLogData
@@ -29,10 +30,12 @@ public:
 	//}
 
 	void ExecCommand(const FString& command_line);
+	void SetRenderer(FRenderer* InRenderer) { Renderer = InRenderer; }
 
 	int TextEditCallback(ImGuiInputTextCallbackData* data);
 
 private:
+	FRenderer* Renderer = nullptr;
 	char                  InputBuf[256];
 	TArray<FLogData>       Items;
 	TArray<FString>		  Commands;
