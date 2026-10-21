@@ -405,7 +405,6 @@ public:
     const FSpotLight GetSpotLightData(uint32 SpotIndex) const { return LightData.SpotLights[SpotIndex]; }
     const FPointLight GetPointLightData(uint32 SpotIndex) const { return LightData.PointLights[SpotIndex]; }
 
-    void SetShadowResolutionQuality(EShadowResolutionQuality InShadowResolutionQuality) { ShadowResolutionQuality = InShadowResolutionQuality; }
 
 private:
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
@@ -544,6 +543,28 @@ public:
             } 
             PointShadowCaches[Index].bIsValid = false;
             PointShadowCaches[Index].bIsDirty = true;
+        }
+    }
+
+    void InvalidateAllAtlasCaches()
+    {
+        for(uint32 i = 0; i < NUM_SPOT_LIGHT; i++)
+        {
+            InvalidSpotCache(i);
+        }
+        for(uint32 i = 0; i < NUM_POINT_LIGHT; i++)
+        {
+            InvalidPointCache(i);
+        }
+        bShadowAtlasInitialCleared = false;
+    }
+
+    void SetShadowResolutionQuality(EShadowResolutionQuality InShadowResolutionQuality)
+    {
+        if (ShadowResolutionQuality != InShadowResolutionQuality)
+        {
+            ShadowResolutionQuality = InShadowResolutionQuality;
+            InvalidateAllAtlasCaches();
         }
     }
 
