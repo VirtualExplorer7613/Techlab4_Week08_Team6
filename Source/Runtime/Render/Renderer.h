@@ -140,9 +140,13 @@ struct alignas(16) FCascadeDebugConstants
     uint32 DebugColorsEnabled = 0;
     uint32 BlendEnabled = 0;
     uint32 Padding[2] = {};
+
+    // X/Y/Z/W: 각 Cascade의 UI Bias를 정규화된 깊이로 변환하는 배율
+    FVector4 BiasScale = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+    FVector4 BiasOffset = FVector4(0.0f, 0.0f, 0.0f, 0.0f);
 };
 
-static_assert(sizeof(FCascadeDebugConstants) == 336, "FCascadeDebugConstants Size Error");
+static_assert(sizeof(FCascadeDebugConstants) == 368, "FCascadeDebugConstants Size Error");
 
 struct FCSMSettings
 {
@@ -213,7 +217,7 @@ public:
     void RenderSpotShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
     void RenderPointShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
 
-    void RenderShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const float TanHalfFovY, const float ViewportHeight, const EViewMode ViewMode);
+    void RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const float TanHalfFovY, const float ViewportHeight, const EViewMode ViewMode, bool bOrthographic = false);
     void CalculateShadowMapLOD(const FVector4 InPositionRadius, const FVector & CameraLocation, const float InViewportHeight, const float CotanHalfFOV, uint32& OutRequestSize);
 
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
@@ -333,6 +337,11 @@ public:
         return bCSMEnabled;
     }
 
+    bool IsCSMActive() const
+    {
+        return CascadeConstants.CSMEnabled != 0 && CascadeConstants.CascadeCount > 0;
+    }
+
     bool GetCascadeBlendEnabled() const
     {
         return bCascadeBlendEnabled;
@@ -366,7 +375,6 @@ public:
         return CSMSettings;
     }
 
-    void PrepareCascadeShadows(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const FVector &CameraForward, float CameraNear, float CameraFar,bool bOrthographic, EViewMode ViewMode);
     void PrepareCascadeShadows(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const FVector& CameraForward, float CameraNear, float CameraFar, bool bOrthographic, EViewMode ViewMode, const FMatrix& CameraWorld, float TanHalfFovX, float TanHalfFovY);
 
     const FSpotLight GetSpotLightData(uint32 SpotIndex) const { return LightData.SpotLights[SpotIndex]; }
