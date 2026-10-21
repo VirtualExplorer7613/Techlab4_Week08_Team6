@@ -140,6 +140,9 @@ cbuffer CascadeDebugConstants : register(b5)
     uint DebugColorsEnabled;
     uint CascadeBlendEnabled;
     uint2 CascadePadding;
+
+    float4 CascadeBiasScale; // X/Y/Z/W: per-cascade UI bias to normalized depth scale
+    float4 CascadeBiasOffset; // Per-cascade texel bias in normalized depth units
 };
 
 #define TILE_SIZE 16
@@ -687,16 +690,16 @@ uint SelectDebugCascade(float3 worldPos)
 
 float3 GetDebugCascadeColor(uint index)
 {
-    if (index == 0)
-        return float3(1, 0, 0);
+    float3 color = float3(1.0f, 0.0f, 0.0f);
     
-    if (index == 1)
-        return float3(0, 1, 0);
-    
-    if (index == 2)
-        return float3(0, 0, 1);
-    
-    return float3(1, 0, 1);
+    if (index == 1u)
+        color = float3(0.0f, 1.0f, 0.0f);
+    else if (index == 2u)
+        color = float3(0.0f, 0.0f, 1.0f);
+    else if (index >= 3u)
+        color = float3(1.0f, 0.0f, 1.0f);
+
+    return color;
 }
 
 // 2열 길이 = 1 / (far - near), 0열 길이 = 2 / 투영 가로 폭
@@ -705,6 +708,11 @@ float4 DirectionalPCSSParams(float4x4 lightVP, float invResolution, float tanHal
     float depthRange = 1.0f / length(float3(lightVP[0][2], lightVP[1][2], lightVP[2][2]));
     float texelPerWorld = length(float3(lightVP[0][0], lightVP[1][0], lightVP[2][0])) * 0.5f / invResolution;
     return float4(depthRange * tanHalfAngle * texelPerWorld, 0.0f, 0.0f, 0.0f);
+}
+
+float CalculateCascadeBias(float baseBias, uint index)
+{
+    return baseBias * CascadeBiasScale[index] + CascadeBiasOffset[index];
 }
 
 // Cascade 보간
@@ -741,9 +749,11 @@ float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentV
     }
 
     float2 texelSize = float2(CascadeInvResolution, CascadeInvResolution);
+    
+    float nextBias = CalculateCascadeBias(bias, nextIndex);
 
     float4 pcssParams = DirectionalPCSSParams(CascadeLightVP[nextIndex], CascadeInvResolution, DirectionalLight.ShadowFilterParameters.z);
-    float nextVisibility = ShadowFiltering2D(CascadeShadowMap, (float) nextIndex, nextPos, bias, CascadeInvResolution, DirectionalLight.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
+    float nextVisibility = ShadowFiltering2D(CascadeShadowMap, (float) nextIndex, nextPos, nextBias, CascadeInvResolution, DirectionalLight.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
     // 현재 픽셀이 전환 구간을 얼마나 지나왔는지 0~1로 계산
     float t = saturate((viewDepth - blendStart) / (blendEnd - blendStart));
     
@@ -798,8 +808,9 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLig
 
     if (useCascade)
     {
+        float cascadeBias = CalculateCascadeBias(bias, cascadeIndex);
         float4 pcssParams = DirectionalPCSSParams(CascadeLightVP[cascadeIndex], invResolution, info.ShadowFilterParameters.z);
-        visibility = ShadowFiltering2D(CascadeShadowMap, (float) cascadeIndex, shadowPos, bias, invResolution, info.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
+        visibility = ShadowFiltering2D(CascadeShadowMap, (float) cascadeIndex, shadowPos, cascadeBias, invResolution, info.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
         visibility = ApplyCascadeShadowBlend(worldPos, cascadeIndex, visibility, bias);
     }
     else
