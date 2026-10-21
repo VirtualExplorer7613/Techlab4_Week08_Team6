@@ -1696,8 +1696,15 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
     Desc.Width = ShadowMap->GetWidth();
     Desc.Height = ShadowMap->GetHeight();
 
-    if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode, bOrthographic ? nullptr : &ShadowCasters))
+    // Perspective 뷰에서 Caster가 없으면 Depth만 초기화한다.
+    if (!bOrthographic && ShadowCasters.IsEmpty())
+    {
+        RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+    }
+    else if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode, bOrthographic ? nullptr : &ShadowCasters))
+    {
         return;
+    }
 
     // Shadow Map 생성과 샘플링에 동일한 Light VP를 사용한다.
     UploadLightGlobalConstants(LightVP);
@@ -1791,16 +1798,47 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
 
     RenderCommand::UnbindShaderResource(14, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex); // ShadowMapAtlasBuffer
 
-    // 그림자를 생성하는 Point/Spot Light가 없으면 Shadow Atlas Pass 전체를 생략한다.
-    bool bHasShadowCastingLight = false;
+    // 카메라 시야에 영향을 주는 그림자 광원이 없으면 Shadow Atlas Pass 전체를 생략한다.
+    bool bHasVisibleShadowCastingLight = false;
 
     for (uint32 i = 0; i < LightData.PointLightCount; ++i)
-        bHasShadowCastingLight |= LightData.PointLights[i].ShadowParameters.W > 0.0f;
+    {
+        FPointLight& PointLightData = LightData.PointLights[i];
+
+        if (PointLightData.ShadowParameters.W <= 0.0f)
+            continue;
+
+        const FVector4& PositionRadius = PointLightData.PositionRadius;
+        if (IsSphereInFrustum(FVector(PositionRadius.X, PositionRadius.Y, PositionRadius.Z), PositionRadius.W, CameraFrustum))
+        {
+            bHasVisibleShadowCastingLight = true;
+        }
+        else 
+        {
+            for (uint32 Face = 0; Face < 6; ++Face)
+                PointLightData.AtlasScaleOffset[Face] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        }
+    }
 
     for (uint32 i = 0; i < LightData.SpotLightCount; ++i)
-        bHasShadowCastingLight |= LightData.SpotLights[i].ShadowParameters.W > 0.0f;
+    {
+        FSpotLight& SpotLightData = LightData.SpotLights[i];
 
-    if (!bHasShadowCastingLight)
+        if (SpotLightData.ShadowParameters.W <= 0.0f)
+            continue;
+
+        const FVector4& PositionRadius = SpotLightData.PositionRadius;
+        if (IsSphereInFrustum(FVector(PositionRadius.X, PositionRadius.Y, PositionRadius.Z), PositionRadius.W, CameraFrustum))
+        {
+            bHasVisibleShadowCastingLight = true;
+        }
+        else
+        {
+            SpotLightData.AtlasScaleOffset = { 0.0f, 0.0f, 0.0f, 0.0f };
+        }
+    }
+
+    if (!bHasVisibleShadowCastingLight)
     {
         // Shadow Pass는 생략하더라도 일반 조명 계산에 필요한 GPU 데이터는 갱신한다.
         ::UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
