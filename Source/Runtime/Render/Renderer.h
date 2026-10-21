@@ -140,9 +140,12 @@ struct alignas(16) FCascadeDebugConstants
     uint32 DebugColorsEnabled = 0;
     uint32 BlendEnabled = 0;
     uint32 Padding[2] = {};
+
+    // X/Y/Z/W: Cascade 0/1/2/3의 Bias 보정 배율
+    FVector4 BiasScale = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
 };
 
-static_assert(sizeof(FCascadeDebugConstants) == 336, "FCascadeDebugConstants Size Error");
+static_assert(sizeof(FCascadeDebugConstants) == 352, "FCascadeDebugConstants Size Error");
 
 struct FCSMSettings
 {

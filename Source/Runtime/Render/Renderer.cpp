@@ -601,6 +601,38 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& 
         // 캐스케이드마다 하나씩 LightVP를 만든다.
         // Count가 4라면 Index는 0, 1, 2, 3.
 
+        // 기존 UI Bias의 기준: 현재 프레임의 Cascade 0, 해상도 2048.
+        constexpr float ReferenceResolution = 2048.0f;
+        float ReferenceNormalizedTexelSize = 0.0f;
+
+        const auto GetNormalizedTexelSize = [](const FMatrix& LightVP, float MapResolution) -> float
+        {
+            // 행 벡터 방식이므로 각 "열"의 XYZ 길이를 사용한다.
+            const FVector WidthColumn(
+                LightVP.M[0][0],
+                LightVP.M[1][0],
+                LightVP.M[2][0]);
+
+            const FVector DepthColumn(
+                LightVP.M[0][2],
+                LightVP.M[1][2],
+                LightVP.M[2][2]);
+
+            const float WidthScale = WidthColumn.Size(); // 투영 폭
+            const float DepthScale = DepthColumn.Size(); // 깊이 범위
+
+            if (WidthScale <= 0.0f || DepthScale <= 0.0f || MapResolution <= 0.0f)
+            {
+                return 0.0f;
+            }
+
+            const float ProjectionWidth = 2.0f / WidthScale;
+            const float DepthRange = 1.0f / DepthScale;
+            const float WorldTexelSize = ProjectionWidth / MapResolution;
+
+            return WorldTexelSize / DepthRange;
+        };
+
         for (uint32 Index = 0; Index < Count; ++Index)
         {
             // ──────────────────────
@@ -769,6 +801,19 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& 
 
             // CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution, MinCasterDepth);
             CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution, MinCasterDepth, StableRadius);
+
+            const FMatrix& FinalLightVP = CascadeConstants.LightVP[Index];
+
+            // Cascade 0의 최종 행렬을 사용하되,
+            // 기준 해상도는 실제 설정과 관계없이 2048로 고정한다.
+            if (Index == 0)
+            {
+                ReferenceNormalizedTexelSize =  GetNormalizedTexelSize(FinalLightVP, ReferenceResolution);
+            }
+
+            const float NormalizedTexelSize = GetNormalizedTexelSize(FinalLightVP, static_cast<float>(Resolution));
+
+            CascadeConstants.BiasScale[Index] = ReferenceNormalizedTexelSize > 0.0f ? NormalizedTexelSize / ReferenceNormalizedTexelSize : 1.0f;
 
             SplitNear = SplitFar;
             Weight *= DistributionExponent;
