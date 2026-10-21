@@ -2190,6 +2190,7 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
 
         uint32 RequestSize = ShadowRenderer->GetShadowAtlasAllocator().GetMinTileSize();
         CalculateShadowMapLOD(LightData.PointLights[i].PositionRadius, CameraLocation, ViewportHeight, CotanHalfFOV, RequestSize);
+        RequestSize = RequestSize >> 1; // PointLight Down scaling
 
         FPointShadowCache& Cache = PointShadowCaches[i];
 
@@ -2211,6 +2212,10 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
         if(!Cache.bIsDirty)
         {
             if(!Cache.bIsValid || PositionRadius != Cache.PrevPositionRadius)
+            {
+                Cache.bIsDirty = true;
+            }
+            else if(RequestSize > Cache.CachedSize || RequestSize <= (Cache.CachedSize >> 2))
             {
                 Cache.bIsDirty = true;
             }
@@ -2266,7 +2271,7 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
             bool bTileReady = false;
 
             // Reuse Tile
-            if(Cache.bIsValid && Cache.CachedTiles[face].NodeIndex != -1 && RequestSize <= Cache.CachedTiles[face].Size)
+            if(Cache.bIsValid && Cache.CachedTiles[face].NodeIndex != -1 && RequestSize <= Cache.CachedTiles[face].Size && RequestSize > (Cache.CachedTiles[face].Size >> 2))
             {
                 ShadowAtlasTile = Cache.CachedTiles[face];
                 bTileReady = true;
@@ -2407,13 +2412,19 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
             {
                 Cache.bIsDirty = true;
             }
-
-            for(const FAABB& DirtyBox : Scene.ShadowDirtyBounds)
+            else if(RequestSize > Cache.CachedSize || RequestSize <= (Cache.CachedSize >> 2))
             {
-                if(::GetIntersectedAABBWithLight(LightPosition, PositionRadius.W, DirtyBox))
+                Cache.bIsDirty = true;
+            }
+            else
+            {
+                for(const FAABB& DirtyBox : Scene.ShadowDirtyBounds)
                 {
-                    Cache.bIsDirty = true;
-                    break;
+                    if(::GetIntersectedAABBWithLight(LightPosition, PositionRadius.W, DirtyBox))
+                    {
+                        Cache.bIsDirty = true;
+                        break;
+                    }
                 }
             }
         }
@@ -2451,7 +2462,7 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
             bool bTileReady = false;
 
             // Reuse Tile
-            if(Cache.bIsValid && Cache.CachedTile.NodeIndex != -1 && RequestSize <= Cache.CachedSize)
+            if(Cache.bIsValid && Cache.CachedTile.NodeIndex != -1 && RequestSize <= Cache.CachedSize && RequestSize > (Cache.CachedSize >> 2))
             {
                 ShadowAtlasTile = Cache.CachedTile;
                 bTileReady = true;
