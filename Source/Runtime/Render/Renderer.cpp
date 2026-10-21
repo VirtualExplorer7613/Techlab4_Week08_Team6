@@ -608,6 +608,39 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& 
         // 캐스케이드마다 하나씩 LightVP를 만든다.
         // Count가 4라면 Index는 0, 1, 2, 3.
 
+        // UI Bias를 고정된 월드 거리로 환산한다. 다른 Cascade의 깊이 범위를 참조하지 않는다.
+        constexpr float UIBiasToWorld = 1.0f;
+        // 기본 거리 보정부터 사용하며, 필요하면 텍셀 비례 추가량을 조정한다.
+        constexpr float TexelBiasAmount = 0.0f;
+
+        const auto GetNormalizedTexelSize = [](const FMatrix& LightVP, float MapResolution) -> float
+        {
+            // 행 벡터 방식이므로 각 "열"의 XYZ 길이를 사용한다.
+            const FVector WidthColumn(
+                LightVP.M[0][0],
+                LightVP.M[1][0],
+                LightVP.M[2][0]);
+
+            const FVector DepthColumn(
+                LightVP.M[0][2],
+                LightVP.M[1][2],
+                LightVP.M[2][2]);
+
+            const float WidthScale = WidthColumn.Size(); // 투영 폭
+            const float DepthScale = DepthColumn.Size(); // 깊이 범위
+
+            if (WidthScale <= 0.0f || DepthScale <= 0.0f || MapResolution <= 0.0f)
+            {
+                return 0.0f;
+            }
+
+            const float ProjectionWidth = 2.0f / WidthScale;
+            const float DepthRange = 1.0f / DepthScale;
+            const float WorldTexelSize = ProjectionWidth / MapResolution;
+
+            return WorldTexelSize / DepthRange;
+        };
+
         for (uint32 Index = 0; Index < Count; ++Index)
         {
             // ──────────────────────
@@ -776,6 +809,19 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& 
 
             // CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution, MinCasterDepth);
             CascadeConstants.LightVP[Index] = ShadowRenderer->BuildDirectionalLightVPFromCorners(SplitCorners, LightDirection, Resolution, MinCasterDepth, StableRadius);
+
+            const FMatrix& FinalLightVP = CascadeConstants.LightVP[Index];
+
+            const FVector DepthColumn(
+                FinalLightVP.M[0][2],
+                FinalLightVP.M[1][2],
+                FinalLightVP.M[2][2]);
+
+            // 직교 투영의 깊이 열 길이 = 1 / (Far - Near).
+            const float InvDepthRange = DepthColumn.Size();
+            CascadeConstants.BiasScale[Index] = UIBiasToWorld * InvDepthRange;
+            CascadeConstants.BiasOffset[Index] = TexelBiasAmount *
+                GetNormalizedTexelSize(FinalLightVP, static_cast<float>(Resolution));
 
             SplitNear = SplitFar;
             Weight *= DistributionExponent;
