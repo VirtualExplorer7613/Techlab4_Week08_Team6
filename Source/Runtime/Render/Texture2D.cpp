@@ -72,6 +72,21 @@ void FTexture2D::CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& I
 		hr = Device->CreateShaderResourceView(Texture.Get(), bTypelessDepth ? &SrvDesc : nullptr, SRV.GetAddressOf());
 		if (FAILED(hr))
 			HTR_LOG(Error, "[Texture2D] CreateShaderResourceView failed (hr=0x{:08X})", (uint32)hr);
+
+		if (bTypelessDepth)
+		{
+			D3D11_SHADER_RESOURCE_VIEW_DESC ArraySrvDesc{};
+			ArraySrvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+			ArraySrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+			ArraySrvDesc.Texture2DArray.MostDetailedMip = 0;
+			ArraySrvDesc.Texture2DArray.MipLevels = 1;
+			ArraySrvDesc.Texture2DArray.FirstArraySlice = 0;
+			ArraySrvDesc.Texture2DArray.ArraySize = 1;
+
+			hr = Device->CreateShaderResourceView(Texture.Get(), &ArraySrvDesc, ArraySRV.GetAddressOf());
+			if (FAILED(hr))
+				HTR_LOG(Error, "[Texture2D] CreateShaderResourceView (array) failed (hr=0x{:08X})", (uint32)hr);
+		}
 	}
 
 	if ((InDesc.BindFlags & D3D11_BIND_RENDER_TARGET) &&

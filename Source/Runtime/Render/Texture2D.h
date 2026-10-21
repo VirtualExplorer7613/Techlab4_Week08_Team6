@@ -17,8 +17,13 @@ public:
 	FTexture2D(ID3D11Device* Device, ComPtr<ID3D11Resource> SwapchainTexture, const D3D11_TEXTURE2D_DESC& InDesc);
 	~FTexture2D() = default;
 
+	// 깊이 텍스처를 slice 1장짜리 Texture2DArray로 읽는 SRV. 그림자 필터가 CSM 배열과 같은 함수를 쓰기 위해 둔다.
+	ID3D11ShaderResourceView* GetArraySRV() const { return ArraySRV.Get(); }
+
 private:
 	void CreateViews(ID3D11Device* Device, const D3D11_TEXTURE2D_DESC& InDesc);
+
+	ComPtr<ID3D11ShaderResourceView> ArraySRV;
 };
 
 class UTexture2D : public URenderAsset
