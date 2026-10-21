@@ -90,6 +90,7 @@ bool UEditorEngine::Init()
 	EditorUI->SetSaveSceneAsCallback([this]() { SaveSceneAs(); });
 
 	OutputLogPanel = EditorUI->AddEditorPanel<FOutputLogPanel>();
+	OutputLogPanel->SetRenderer(Renderer);
 	FLog::AddSink(OutputLogPanel);
 	HTR_LOG(Info, "Editor Initialize...");
 

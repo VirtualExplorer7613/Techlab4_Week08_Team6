@@ -2,6 +2,9 @@
 #include "Editor/OutputLog/OutputLogPanel.h"
 
 #include "Core/Stats/StatOverlay.h"
+#include "Render/Renderer.h"
+
+#include <sstream>
 
 static int TextEditCallbackStub(ImGuiInputTextCallbackData* data)
 {
@@ -25,6 +28,7 @@ bool FOutputLogPanel::Init()
 	Commands.Add("HISTORY");
 	Commands.Add("CLEAR");
 	Commands.Add("STAT");
+	Commands.Add("r.Shadow.CSM");
 
 	HistoryPos = -1;
 	InputBuf[0] = '\0';
@@ -175,6 +179,36 @@ void FOutputLogPanel::ExecCommand(const FString& CommandLine)
 		return;
 	}
 
+	std::istringstream CommandStream(CommandLine);
+	FString CommandName;
+	CommandStream >> CommandName;
+	if (EqualsIgnoreCase(CommandName, "r.Shadow.CSM"))
+	{
+		FString Value;
+		FString ExtraArgument;
+		CommandStream >> Value;
+		if ((!Value.empty() && Value != "0" && Value != "1") || (CommandStream >> ExtraArgument))
+		{
+			FLog::Log(ELogVerbosity::Warning, "Usage: r.Shadow.CSM [0|1] (0: Standard Shadow Map, 1: CSM; omit value to query)");
+		}
+		else if (!Renderer)
+		{
+			FLog::Log(ELogVerbosity::Warning, "r.Shadow.CSM: renderer is unavailable");
+		}
+		else
+		{
+			// ImGui 체크박스와 같은 상태를 사용한다. 별도 콘솔 상태는 두지 않는다.
+			if (!Value.empty())
+				Renderer->SetCSMEnabled(Value == "1");
+
+			const bool bEnabled = Renderer->GetCSMEnabled();
+			FLog::Log(ELogVerbosity::Info, "r.Shadow.CSM = {} (Directional Light: {})",
+				bEnabled ? 1 : 0, bEnabled ? "CSM" : "Standard Shadow Map");
+		}
+		ScrollToBottom = true;
+		return;
+	}
+
 	if (EqualsIgnoreCase(CommandLine, "CLEAR"))
 	{
 		ClearLog();
@@ -185,6 +219,7 @@ void FOutputLogPanel::ExecCommand(const FString& CommandLine)
 		for (const FString& Command : Commands)
 			FLog::Log(ELogVerbosity::Info, "- {}", Command);
 		OnLog(ELogVerbosity::Info, "- STAT <fps|memory|all|none>");
+		OnLog(ELogVerbosity::Info, "- r.Shadow.CSM [0|1] (omit value to query)");
 	}
 	else if (EqualsIgnoreCase(CommandLine, "HISTORY"))
 	{
