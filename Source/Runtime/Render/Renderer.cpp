@@ -7,6 +7,9 @@
 #include "Core/EngineTimer.h"
 #include "Core/Stats/LightweightStats.h"
 #include "Core/Stats/ShadowStats.h"
+#include "Core/Stats/StatOverlay.h"
+#include "Component/DirectionalLightComponent.h"
+#include "Component/SpotLightComponent.h"
 
 #include "Engine/PrimitiveSceneProxy.h"
 #include "Engine/Scene.h"
@@ -27,6 +30,25 @@ DECLARE_CYCLE_STAT("Upload Per-Object CB", STAT_UploadPerObjectCB);
 
 namespace
 {
+    bool IsShadowCaster(const FPrimitiveSceneProxy* Proxy)
+    {
+        return Proxy && Proxy->IsVisible() && Proxy->GetCastShadows() && Proxy->GetMesh() &&
+            Proxy->GetRenderState() && Proxy->GetLODCount() > 0;
+    }
+
+    void RecordShadowCasterQuery(const FScene& Scene, uint64 Retained)
+    {
+        if (!FStatOverlay::IsEnabled(EStatFlags::Shadow))
+            return;
+
+        // 적격 후보는 Scene마다 프레임당 한 번만 센다. BVH나 Draw 목록을 재생성하지 않는다.
+        auto [Entry, bInserted] = ShadowStats::CasterCandidates.try_emplace(&Scene, 0);
+        if (bInserted)
+            for (const FPrimitiveSceneProxy* Proxy : Scene.Proxies)
+                Entry->second += IsShadowCaster(Proxy) ? 1u : 0u;
+        ShadowStats::RecordCasterQuery(Entry->second, Retained);
+    }
+
 	// VSSetConstantBuffers1의 오프셋은 16개 상수(256바이트) 단위여야 하므로 오브젝트마다 256바이트 칸을 쓴다.
 	constexpr uint32 PerObjectSlotConstants = 16;
 	static_assert(sizeof(FPerObjectConstants) <= ObjectSlotBytes);
@@ -254,6 +276,7 @@ void FRenderer::RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &C
         // Caster가 없는 Cascade는 깊이만 초기화하고 Shadow Draw를 생략한다.
         if (CascadeShadowCasters[Index].IsEmpty() && Desc.DepthView && Desc.Width > 0 && Desc.Height > 0)
         {
+            FScopedShadowGPUTime GPUTime(ShadowGPUProfiler);
             RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
             ++ShadowStats::Pending.DepthClears;
             bUpdatedMap = true;
@@ -816,6 +839,8 @@ void FRenderer::UpdateCascadeDebugConstants(const FScene& Scene, const FMatrix& 
 
                     ShadowCasters.Add(Proxy);
                 });
+
+            RecordShadowCasterQuery(Scene, ShadowCasters.Num());
 
             const FMatrix LightView = ShadowRenderer->BuildDirectionalLightView(SplitCorners, LightDirection);
 
@@ -1593,6 +1618,7 @@ void FRenderer::GatherShadowCasters(const FScene& Scene, const FMatrix& LightVP,
 
             OutCasters.Add(Proxy);
         });
+    RecordShadowCasterQuery(Scene, OutCasters.Num());
 }
 
 void FRenderer::DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters)
@@ -1686,6 +1712,7 @@ bool FRenderer::RecreateCSMResources(const FCSMSettings &NewSettings)
 
 bool FRenderer::RenderShadowDepth(const FScene& Scene, const FShadowPassDesc& Desc, const FMatrix& LightVP, EViewMode ViewMode, const TArray<FPrimitiveSceneProxy*>* ShadowCasters)
 {
+    FScopedShadowGPUTime GPUTime(ShadowGPUProfiler);
     if (!ShadowRenderer || !ShadowRenderer->BeginShadowPass(Desc))
         return false;
 
@@ -1781,6 +1808,7 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
     // Perspective 뷰에서 Caster가 없으면 Depth만 초기화한다.
     if (!bOrthographic && ShadowCasters.IsEmpty())
     {
+        FScopedShadowGPUTime GPUTime(ShadowGPUProfiler);
         RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
         ++ShadowStats::Pending.DepthClears;
     }
@@ -1874,6 +1902,34 @@ void FRenderer::RenderPointShadowMap(const FScene &Scene, const FMatrix &CameraV
     //RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
 }
 
+void FRenderer::BeginShadowStatsFrame()
+{
+    ShadowStats::BeginFrame();
+    if (ShadowStatsResetGeneration != FStatOverlay::GetResetGeneration())
+    {
+        ShadowGPUProfiler.ResetStats();
+        ShadowStatsResetGeneration = FStatOverlay::GetResetGeneration();
+    }
+    ShadowGPUProfiler.BeginFrame(FStatOverlay::IsEnabled(EStatFlags::Shadow));
+}
+
+void FRenderer::RecordShadowSceneStats(const FScene& Scene)
+{
+    if (!FStatOverlay::IsEnabled(EStatFlags::Shadow))
+        return;
+    for (ULightComponentBase* Light : Scene.LightComponents)
+    {
+        if (!Light || !Light->GetCastShadows() || Light->GetIntensity() <= 0.0f)
+            continue;
+        if (Cast<USpotLightComponent>(Light))
+            ShadowStats::RecordLight(Light, 2);
+        else if (Cast<UPointLightComponent>(Light))
+            ShadowStats::RecordLight(Light, 1);
+        else if (Cast<UDirectionalLightComponent>(Light))
+            ShadowStats::RecordLight(Light, 0);
+    }
+}
+
 void FRenderer::RecordShadowViewStats(bool bShadowView)
 {
     auto& Stats = ShadowStats::Pending;
@@ -1894,6 +1950,18 @@ void FRenderer::RecordShadowViewStats(bool bShadowView)
             LightData.SpotLights[Index].ColorIntensity.W > 0.0f ? 1u : 0u;
     }
 
+    if (!bShadowView)
+    {
+        Stats.SkippedLights[0] += LightData.DirectionalLight.ShadowParameters.W > 0.0f &&
+            LightData.DirectionalLight.ColorIntensity.W > 0.0f ? 1u : 0u;
+        for (uint32 Index = 0; Index < LightData.PointLightCount; ++Index)
+            Stats.SkippedLights[1] += LightData.PointLights[Index].ShadowParameters.W > 0.0f &&
+                LightData.PointLights[Index].ColorIntensity.W > 0.0f ? 1u : 0u;
+        for (uint32 Index = 0; Index < LightData.SpotLightCount; ++Index)
+            Stats.SkippedLights[2] += LightData.SpotLights[Index].ShadowParameters.W > 0.0f &&
+                LightData.SpotLights[Index].ColorIntensity.W > 0.0f ? 1u : 0u;
+    }
+
     if (bShadowView && IsCSMActive())
     {
         Stats.ActiveCascades = std::max(Stats.ActiveCascades, CascadeConstants.CascadeCount);
@@ -1901,9 +1969,21 @@ void FRenderer::RecordShadowViewStats(bool bShadowView)
     }
 }
 
-void FRenderer::CompleteShadowStatsFrame() const
+void FRenderer::CompleteShadowStatsFrame()
 {
+    // Reset 버튼은 UI 프레임 도중에도 눌릴 수 있다. 현재 GPU 표본도 게시 전에 폐기한다.
+    if (ShadowStatsResetGeneration != FStatOverlay::GetResetGeneration())
+    {
+        ShadowGPUProfiler.ResetStats();
+        ShadowStatsResetGeneration = FStatOverlay::GetResetGeneration();
+    }
+    ShadowGPUProfiler.EndFrame();
     auto& Stats = ShadowStats::Pending;
+    const auto& GPUTime = ShadowGPUProfiler.GetStats();
+    Stats.bGPUTimeAvailable = GPUTime.bAvailable;
+    Stats.GPULastMs = GPUTime.LastMs;
+    Stats.GPUAverageMs = GPUTime.AverageMs;
+    Stats.GPUMaxMs = GPUTime.MaxMs;
     Stats.ConfiguredCascades = CSMSettings.CascadeCount;
     Stats.bCSMEnabled = bCSMEnabled;
     Stats.CascadeResolution = CascadeShadowMaps.GetResolution();
@@ -2067,6 +2147,12 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
 
     if (!bHasVisibleShadowCastingLight)
     {
+        for (uint32 Index = 0; Index < LightData.PointLightCount; ++Index)
+            ShadowStats::Pending.SkippedLights[1] += LightData.PointLights[Index].ShadowParameters.W > 0.0f &&
+                LightData.PointLights[Index].ColorIntensity.W > 0.0f ? 1u : 0u;
+        for (uint32 Index = 0; Index < LightData.SpotLightCount; ++Index)
+            ShadowStats::Pending.SkippedLights[2] += LightData.SpotLights[Index].ShadowParameters.W > 0.0f &&
+                LightData.SpotLights[Index].ColorIntensity.W > 0.0f ? 1u : 0u;
         // Shadow Pass는 생략하더라도 일반 조명 계산에 필요한 GPU 데이터는 갱신한다.
         ::UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
         ::UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight) * LightData.PointLightCount);
@@ -2081,7 +2167,15 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
     Desc.bClearDepth = !bShadowAtlasInitialCleared;
     bShadowAtlasInitialCleared = true;
 
-    ShadowRenderer->BeginShadowPass(Desc);
+    if (Desc.bClearDepth)
+    {
+        FScopedShadowGPUTime GPUTime(ShadowGPUProfiler);
+        ShadowRenderer->BeginShadowPass(Desc);
+    }
+    else
+    {
+        ShadowRenderer->BeginShadowPass(Desc);
+    }
 
     float AtlasSize = ShadowMap->GetWidth();
 
@@ -2101,6 +2195,8 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
 
         if(LightData.PointLights[i].ShadowParameters.W == 0.0f || !IsSphereInFrustum(LightPosition, PositionRadius.W, CameraFrustum) || RequestSize == 0)
         {
+            ShadowStats::Pending.SkippedLights[1] += LightData.PointLights[i].ShadowParameters.W > 0.0f &&
+                LightData.PointLights[i].ColorIntensity.W > 0.0f ? 1u : 0u;
             for(uint32 face = 0; face < 6; face++)
             {
                 LightData.PointLights[i].AtlasScaleOffset[face] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -2213,7 +2309,10 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
                 uint32 InnerSize = ShadowAtlasTile.Size;
                 AllocatedFaceSize = InnerSize;
 
-                ShadowRenderer->ClearShadowTile(ShadowAtlasTile);
+                {
+                    FScopedShadowGPUTime GPUTime(ShadowGPUProfiler);
+                    ShadowRenderer->ClearShadowTile(ShadowAtlasTile);
+                }
 
                 ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
 
@@ -2228,7 +2327,10 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
                 LightData.PointLights[i].AtlasScaleOffset[face] = { (float)InnerSize / AtlasSize, (float)InnerSize / AtlasSize, (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; //UV
                 LightData.PointLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
-                DrawShadowCasters(Scene, FaceVP, ViewMode, &ShadowCasters);
+                {
+                    FScopedShadowGPUTime GPUTime(ShadowGPUProfiler);
+                    DrawShadowCasters(Scene, FaceVP, ViewMode, &ShadowCasters);
+                }
                 ++ShadowStats::Pending.Passes;
                 ++ShadowStats::Pending.PointFaces;
                 bUpdatedPointMap = true;
@@ -2244,8 +2346,13 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
             }
         }
 
-        if (bUpdatedPointMap)
-            ++ShadowStats::Pending.UpdatedLights[1];
+        if (LightData.PointLights[i].ColorIntensity.W > 0.0f)
+        {
+            if (bUpdatedPointMap)
+                ++ShadowStats::Pending.UpdatedLights[1];
+            else
+                ++ShadowStats::Pending.SkippedLights[1];
+        }
 
         Cache.bIsValid = true;
         Cache.bIsDirty = false;
@@ -2281,6 +2388,8 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
 
         if(LightData.SpotLights[i].ShadowParameters.W == 0.0f || !IsSphereInFrustum(LightPosition, PositionRadius.W, CameraFrustum) || RequestSize == 0)
         {
+            ShadowStats::Pending.SkippedLights[2] += LightData.SpotLights[i].ShadowParameters.W > 0.0f &&
+                LightData.SpotLights[i].ColorIntensity.W > 0.0f ? 1u : 0u;
             LightData.SpotLights[i].AtlasScaleOffset = { 0.0f, 0.0f, 0.0f, 0.0f };
             InvalidSpotCache(i);
             continue;
@@ -2312,6 +2421,7 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
         // Cache Hit
         if(Cache.bIsValid && !Cache.bIsDirty && RequestSize <= Cache.CachedSize)
         {
+            ShadowStats::Pending.SkippedLights[2] += LightData.SpotLights[i].ColorIntensity.W > 0.0f ? 1u : 0u;
             LightData.SpotLights[i].AtlasScaleOffset = Cache.CachedScaleOffset;
             LightData.SpotLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
             continue;
@@ -2324,6 +2434,7 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
         // Caster가 없으면 Atlas 타일을 할당하지 않고 다음 Spot Light로 넘어간다.
         if (ShadowCasters.IsEmpty())
         {
+            ShadowStats::Pending.SkippedLights[2] += LightData.SpotLights[i].ColorIntensity.W > 0.0f ? 1u : 0u;
             ShadowRenderer->GetShadowAtlasAllocator().Free(Cache.CachedTile.NodeIndex);
             Cache.CachedTile.NodeIndex = -1;
             Cache.bIsValid = true;
@@ -2384,17 +2495,23 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
                 uint32 InnerY = ShadowAtlasTile.Y + SHADOW_ATLAS_BORDER;
                 uint32 InnerSize = ShadowAtlasTile.Size - 2 * SHADOW_ATLAS_BORDER;
 
-                ShadowRenderer->ClearShadowTile(ShadowAtlasTile);
+                {
+                    FScopedShadowGPUTime GPUTime(ShadowGPUProfiler);
+                    ShadowRenderer->ClearShadowTile(ShadowAtlasTile);
+                }
 
                 ShadowRenderer->SetShadowViewPort(InnerX, InnerY, InnerSize, InnerSize);
 
                 LightData.SpotLights[i].AtlasScaleOffset = { (float)InnerSize / AtlasSize , (float)InnerSize / AtlasSize , (float)InnerX / AtlasSize, (float)InnerY / AtlasSize }; // UV
                 LightData.SpotLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
-                DrawShadowCasters(Scene, LightVP, ViewMode, &ShadowCasters);
+                {
+                    FScopedShadowGPUTime GPUTime(ShadowGPUProfiler);
+                    DrawShadowCasters(Scene, LightVP, ViewMode, &ShadowCasters);
+                }
                 ++ShadowStats::Pending.Passes;
                 ++ShadowStats::Pending.SpotTiles;
-                ++ShadowStats::Pending.UpdatedLights[2];
+                ShadowStats::Pending.UpdatedLights[2] += LightData.SpotLights[i].ColorIntensity.W > 0.0f ? 1u : 0u;
 
                 Cache.bIsValid = true;
                 Cache.bIsDirty = false;
@@ -2409,6 +2526,7 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
                 LightData.SpotLights[i].AtlasScaleOffset = { 0.0f,0.0f,0.0f,0.0f };
                 Cache.CachedTile.NodeIndex = -1;
                 Cache.bIsValid = false;
+                ShadowStats::Pending.SkippedLights[2] += LightData.SpotLights[i].ColorIntensity.W > 0.0f ? 1u : 0u;
             }
         }
 

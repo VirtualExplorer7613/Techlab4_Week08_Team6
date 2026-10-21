@@ -1,5 +1,6 @@
 #include "EnginePCH.h"
 #include "Core/Stats/ShadowStats.h"
+#include "Core/Stats/StatOverlay.h"
 #include "Render/Shadow/ShadowRenderer.h"
 
 #include <stdexcept>
@@ -107,6 +108,42 @@ namespace
             "fully skipped workload is zero next frame");
         Check(ShadowStats::IsShadowStat(ShadowStats::STAT_ShadowTotal), "profile hides total when shadow overlay is enabled");
     }
+
+    void TestDemoCounters()
+    {
+        ShadowStats::BeginFrame();
+        int PointLight = 0;
+        int SpotLight = 0;
+        ShadowStats::RecordLight(&PointLight, 1);
+        ShadowStats::RecordLight(&PointLight, 1); // 동일 광원의 두 View
+        ShadowStats::RecordLight(&SpotLight, 2);
+        ShadowStats::RecordCasterQuery(10, 3);
+        ShadowStats::RecordCasterQuery(10, 0); // 다른 Face에서 전부 제외
+        ShadowStats::EndFrame();
+        Check(ShadowStats::Completed.Lights[1] == 1 && ShadowStats::Completed.Lights[2] == 1,
+            "shadow light count must not multiply with views");
+        Check(ShadowStats::Completed.CastersTested == 20 && ShadowStats::Completed.CastersCulled == 17,
+            "caster cull counts excluded candidates per actual query");
+        ShadowStats::BeginFrame();
+        ShadowStats::RecordLight(&PointLight, 1);
+        ShadowStats::EndFrame();
+        Check(ShadowStats::Completed.CastersTested == 0 && ShadowStats::Completed.CastersCulled == 0,
+            "cached pass without query must not claim caster culling");
+        Check(ShadowStats::Completed.Lights[1] == 1 && ShadowStats::Completed.Lights[2] == 0,
+            "unique light set resets per frame");
+
+        FStatOverlay::ResetSamples();
+        FStatOverlay::RecordFrame(100);
+        Check(FStatOverlay::GetFrameTiming().LastCycles == 100, "frame stats store unclamped raw cycles");
+        FStatOverlay::RecordFrame(0);
+        Check(FStatOverlay::GetFrameTiming().SampleCount == 2 &&
+            FStatOverlay::GetFrameTiming().WindowSumCycles == 100 &&
+            FStatOverlay::GetFrameTiming().MaxFrameCycles == 100, "frame Last Avg Max include zero sample");
+        const uint64 Generation = FStatOverlay::GetResetGeneration();
+        FStatOverlay::ResetSamples();
+        Check(FStatOverlay::GetFrameTiming().SampleCount == 0 &&
+            FStatOverlay::GetResetGeneration() != Generation, "reset clears frame samples and notifies GPU profiler");
+    }
 }
 
 int main()
@@ -117,7 +154,8 @@ int main()
         TestFrameAggregation();
         TestAtlasAllocation();
         TestFramePublication();
-        std::cout << "PASS: frame aggregation, skipped frames, 120-frame window, Picking, atlas allocation, publication\n";
+        TestDemoCounters();
+        std::cout << "PASS: frame aggregation, skipped frames, 120-frame window, Picking, atlas, unique lights, caster queries, raw frame time/reset\n";
         return 0;
     }
     catch (const std::exception& Error)

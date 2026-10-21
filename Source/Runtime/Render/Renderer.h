@@ -11,6 +11,7 @@
 #include "Shared/LightDefinitions.h"
 #include "Shadow/ShadowRenderer.h"
 #include "Shadow/CascadeShadowMaps.h"
+#include "Shadow/ShadowGPUProfiler.h"
 
 constexpr uint32 ObjectSlotBytes = 256;
 
@@ -244,7 +245,9 @@ public:
 
     void RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const float TanHalfFovY, const float ViewportHeight, const EViewMode ViewMode, bool bOrthographic = false);
     void RecordShadowViewStats(bool bShadowView);
-    void CompleteShadowStatsFrame() const;
+    void RecordShadowSceneStats(const FScene& Scene);
+    void BeginShadowStatsFrame();
+    void CompleteShadowStatsFrame();
     void CalculateShadowMapLOD(const FVector4 InPositionRadius, const FVector & CameraLocation, const float InViewportHeight, const float CotanHalfFOV, uint32& OutRequestSize);
 
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.
@@ -409,6 +412,8 @@ public:
 
 
 private:
+    FShadowGPUProfiler ShadowGPUProfiler;
+    uint64 ShadowStatsResetGeneration = 0;
 	// FIFO 소비용 배열의 용량만 재사용하며 매 View의 패킷 값은 새로 채운다.
 	FRenderQueue RenderPackets;
 	// 정렬된 RenderPackets에서 반투명 패킷이 시작되는 위치

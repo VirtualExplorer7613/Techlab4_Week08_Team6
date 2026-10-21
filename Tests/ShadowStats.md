@@ -1,5 +1,20 @@
 # stat shadow 변경 및 검증 기록
 
+## 시연용 요약 화면
+
+`stat shadow`는 FPS와 아래 6개만 표시한다. 시간은 Last / Avg / Max, 자원·작업량은 현재 완료 프레임 값이다. Picking은 `stat profile`에서만 표시한다.
+
+| 항목 | 정의 |
+| --- | --- |
+| Frame ms | 메인 Present를 포함한 실제 프레임 간격. EngineTimer의 DeltaTime clamp를 거치지 않음 |
+| Shadow Map GPU ms | 실제 Depth Draw 및 Depth/Atlas 초기화 구간의 GPU timestamp 합. 여러 View/Face/Cascade 합산. PCF/PCSS, 메인 패스, 축소 미리보기 제외 |
+| Memory (estimated) | 아래 정의의 공유 Shadow 리소스 메모리 추정치 |
+| Lights D/P/S | 이번 프레임에 렌더한 Scene의 CastShadows 켜짐·Intensity > 0인 고유 광원. 같은 광원의 여러 View 중복 제외 |
+| Updates / Skipped | 실제 갱신 / 생략 분기에서 센 광원×View 횟수. Point의 6면 및 CSM의 여러 Cascade는 광원 1회. CastShadow 꺼짐·Intensity 0은 대상에서 제외. Skipped에는 Atlas 할당 실패도 포함 |
+| Casters Culled / Tested | 실제 Caster 쿼리마다 적격 전체 후보 대비 공간 컬링으로 제외한 수 / 후보 수. CastShadow 꺼짐·비가시·메시 없음은 후보에서 제외. 여러 Cascade/Face/View 또는 재쿼리 중복 포함. 캐시 재사용·광원 생략으로 쿼리를 안 한 경우 0/0 |
+
+캐스터 후보 수는 `stat shadow` 활성 시 Scene마다 프레임당 한 번 순회해 재사용한다. BVH 조회나 Draw 목록은 다시 만들지 않는다. 직교 Directional의 기존 무컬링 경로는 Caster 쿼리 수에 포함하지 않는다. Frame/GPU Avg는 최근 최대 120개 표본, Max는 Reset 이후 최대값이다. GPU는 정상 회수된 프레임 표본 기준이며 CPU/작업량보다 지연되어 표시된다. `Reset Stats`는 CPU/Frame/GPU 표본과 pending GPU 결과의 게시 세대를 함께 초기화한다.
+
 ## 수정 파일
 
 | 파일 | 변경 |
@@ -27,7 +42,7 @@
 
 ## 작업량과 리소스의 정의
 
-작업량은 매 에디터 프레임 시작에 초기화하고 모든 View의 실제 제출을 합산한다. 프레임 끝에 리소스 상태와 함께 게시한다. Overlay는 CPU와 마찬가지로 마지막 완료 프레임을 읽는다. 통계가 꺼져 있어도 수집 경로는 같으며 Scene/BVH 추가 조회나 별도 Caster 목록을 만들지 않는다.
+작업량은 매 에디터 프레임 시작에 초기화하고 모든 View의 실제 제출을 합산한다. 프레임 끝에 리소스 상태와 함께 게시한다. Overlay는 마지막 완료 프레임을 읽는다. 아래 세부 작업량은 내부 진단용으로 유지하며 시연 요약 화면에는 표시하지 않는다.
 
 | 항목 | 정확한 의미 |
 | --- | --- |
@@ -47,13 +62,15 @@
 
 메모리에는 Directional, Atlas, CSM 배열, 아직 할당되어 있는 전용 Spot/Point Cube, 축소 미리보기 텍스처를 포함한다. 미리보기 메모리는 별도로 병기한다. SRV/DSV/Slice View는 중복 집계하지 않는다. CSM을 꺼도 해제되지 않은 리소스는 계속 계산한다. 드라이버 정렬/압축/실제 VRAM 할당량을 나타내는 값은 아니다.
 
-## GPU 시간 보류
+## GPU 시간 계측
 
-현재 엔진에는 재사용할 비동기 Timestamp/Disjoint 프레임 측정 인프라가 없다. 기존 Query 코드는 Occlusion 결과를 같은 프레임에 기다리거나 Readback하는 용도다. 이를 Shadow 시간 측정에 재사용하지 않았다. Overlay에는 `GPU Depth: N/A`를 표시하며 CPU 시간을 대신 표시하지 않는다.
+`ShadowGPUProfiler.h`의 독립 Timestamp/Disjoint ring을 사용한다. 프레임 슬롯 8개, 프레임당 구간 128개를 한도로 Query를 재사용한다. 기존 Occlusion의 동기 Readback 경로를 사용하지 않는다.
 
-후속 작업은 Timestamp/Disjoint Query의 프레임 간 수명 및 고정 용량 풀, 여러 View/Face/Tile 구간 합산, `D3D11_ASYNC_GETDATA_DONOTFLUSH` 기반 이전 프레임 비동기 회수, 미완료/Disjoint/용량 초과 결과의 N/A 처리다. 범위는 Depth Map 생성에 한정하고 메인 패스의 PCF/PCSS 비용과 분리해야 한다. 이 작업에서는 해당 구조를 새로 추가하지 않았다.
+제품 경로의 조회는 `D3D11_ASYNC_GETDATA_DONOTFLUSH`이며 대기·Flush하지 않는다. 구간이 전부 준비된 프레임만 순서대로 합산 게시한다. 처음 결과를 기다릴 때, Disjoint, Query 오류, 용량 초과는 N/A다. 일반 pending 중에는 마지막 정상 표본을 유지한다. Reset·비활성화·한도 초과 후 이전 결과가 다시 표시되지 않도록 세대로 구분한다. 실제 Depth 명령이 없는 정상 프레임은 0 표본이다.
 
-## 검증 결과
+`ShadowGPUProfilerTests`는 실제 D3D11 WARP에서 독립 timestamp 경계로 구간 합산과 중간 작업 제외를 대조한다. 0 구간, 최근 120개 표본, Reset·비활성화, 구간/ring 포화와 회복을 실행 검증한다. 실제 clock disjoint·device loss는 강제 유발하지 않았으며 오류 처리는 코드 검토 범위다.
+
+## 기존 검증 결과 (GPU 계측 추가 이전)
 
 - Debug x64 에디터/엔진 빌드 성공. 제한된 실행 환경의 MSVC PDB C1902 오류는 동일 빌드를 제한 밖에서 실행하여 해소했다. 기존 숫자 변환/중복 import 라이브러리 등의 경고는 남아 있다.
 - `ShadowStatsTests`: 성공. 실행 후 미호출 Last=0, 0을 포함한 평균, 120프레임 뒤 오래된 샘플 제거, lifetime Max/Total, Picking Attempts, 여러 호출 프레임 합산, 비활성/Always 타이머, Reset, 타일 할당/실패/해제/병합/전체 점유/Reset 검증.
@@ -76,6 +93,14 @@
 
 기존 렌더링 조건, Culling/Cache 판정, 할당/해제 순서, Light Buffer 갱신 및 실제 Draw 인자는 변경하지 않았다. Allocator에 점유량 계수 갱신을 추가했으며 노드 상태 전이와 할당 결정은 기존 그대로다. 통계의 정수 연산/읽기 조회와 CPU 타이머 오버헤드는 추가된다. 에디터 GUI 화면의 시각 검증과 GPU 시간 측정은 완료하지 않았다.
 
+## 시연 요약 및 GPU 추가 후 검증
+
+- Debug x64 엔진·에디터 빌드 통과. 제한 환경의 C1902는 동일 빌드를 제한 밖에서 재실행해 해소했다. 기존 변환·링커 경고는 남아 있다.
+- `ShadowStatsTests`: 기존 집계/Allocator와 고유 광원, 쿼리별 컬링, 캐시 프레임의 0/0, Frame Last/Avg/Max 및 Reset 검증 통과.
+- `ShadowRenderingStatsTests`: 실제 D3D11에서 6 Point 면에 걸친 적격 캐스터 12개 중 11개 제외, CastShadow 꺼진 객체의 후보 제외, 캐시 재사용과 컬링 분리, 밝기 0 혼합 광원의 집계 제외, 실제 광원 타입/고유 수, Renderer GPU 시간 게시와 무작업 0 프레임 검증 통과.
+- `ShadowGPUProfilerTests`: 실제 WARP의 다중 GPU 구간 합산·범위 제외·0 구간·120표본·Reset/disable·구간/ring 포화와 회복 검증 통과.
+- 실제 Overlay 함수 본문을 독립 ImGui/D3D11 화면에 렌더해 100%/150% 배율에서 열 정렬·겹침과 640×600 영역 내 배치를 확인했다. 화면 검증에는 가상 값을 사용했다. GUI를 조작하는 전체 엔진 시연 자체는 자동화하지 않았다.
+
 ## 재실행
 
 프로젝트 루트에서 VS x64 Developer Command Prompt로 실행한다. 테스트는 독립 실행 파일이므로 에디터/엔진 vcxproj에는 포함하지 않는다.
@@ -86,4 +111,6 @@ cl /nologo /std:c++20 /EHsc /utf-8 /MDd /D_DEBUG /I Source\Runtime /I Source\Thi
 Build\ShadowStatsTests.exe
 cl /nologo /std:c++20 /EHsc /utf-8 /MDd /D_DEBUG /I Source\Runtime /I Source\ThirdParty\json /I Resources\Shader Tests\ShadowRenderingStatsTests.cpp /FoBuild\ShadowRenderingStatsTests.obj /FeBuild\ShadowRenderingStatsTests.exe /link Build\Bin\Debug-windows-x86_64\HitoriEngine.lib
 Build\ShadowRenderingStatsTests.exe
+cl /nologo /std:c++20 /EHsc /utf-8 /MDd /D_DEBUG /I Source\Runtime /I Source\ThirdParty\json /I Resources\Shader Tests\ShadowGPUProfilerTests.cpp /FoBuild\ShadowGPUProfilerTests.obj /FeBuild\ShadowGPUProfilerTests.exe /link Build\Bin\Debug-windows-x86_64\HitoriEngine.lib
+Build\ShadowGPUProfilerTests.exe
 ```

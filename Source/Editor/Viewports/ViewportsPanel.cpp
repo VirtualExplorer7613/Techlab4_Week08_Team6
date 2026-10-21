@@ -340,7 +340,7 @@ void FViewportsPanel::OnRender()
 		{
 			PlaceToolbarItem(ButtonWidth("Reset Stats"));
 			if (ImGui::Button("Reset Stats"))
-				FStatRegistry::Reset();
+				FStatOverlay::ResetSamples();
 			StatResetButtonMin = ImGui::GetItemRectMin();
 			StatResetButtonMax = ImGui::GetItemRectMax();
 			bStatResetButtonVisible = true;
@@ -384,7 +384,7 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 	};
 	TArray<FStatLine> Lines;
 
-	if (FStatOverlay::IsEnabled(EStatFlags::FPS))
+	if (FStatOverlay::IsEnabled(EStatFlags::FPS) && !FStatOverlay::IsEnabled(EStatFlags::Shadow))
 	{
 		Lines.Add({"FPS", TitleColor});
 		Lines.Add({std::format("  {:.1f} fps", FStatOverlay::GetFPS()), ValueColor});
@@ -407,6 +407,7 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 		ImU32 Color;
 		FString Values[3];
 		bool bFullWidth = false;
+		bool bCurrentValue = false;
 	};
 	TArray<FProfileStatLine> ProfileLines;
 	if (FStatOverlay::IsEnabled(EStatFlags::Profile))
@@ -433,75 +434,52 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 
     if (FStatOverlay::IsEnabled(EStatFlags::Shadow))
     {
-        ProfileLines.Add({"Shadow Performance (ms)", TitleColor, {"Last", "Avg", "Max"}});
-
-        const auto AddShadowStat = [&ProfileLines](const char *Label, TStatId StatId)
-        {
-            const FCycleStatData *Data = FStatRegistry::Find(StatId);
-
-            FProfileStatLine Line{"  " + FString(Label), ValueColor};
-            Line.Values[0] = std::format("{:.2f}", Data ? Data->GetLastMs() : 0.0);
-            Line.Values[1] = std::format("{:.2f}", Data ? Data->GetRecentAverageMs() : 0.0);
-            Line.Values[2] = std::format("{:.2f}", Data ? Data->GetMaxMs() : 0.0);
-
-            ProfileLines.Add(Line);
-        };
-
-        AddShadowStat("CPU Total", ShadowStats::STAT_ShadowTotal);
-        AddShadowStat("Directional CPU", ShadowStats::STAT_ShadowDirectional);
-        AddShadowStat("CSM CPU", ShadowStats::STAT_ShadowCSM);
-        AddShadowStat("Atlas CPU", ShadowStats::STAT_ShadowAtlas);
-
         const auto AddInfo = [&ProfileLines](FString Text, ImU32 Color = ValueColor)
         {
             FProfileStatLine Line{std::move(Text), Color};
             Line.bFullWidth = true;
             ProfileLines.Add(Line);
         };
-        AddInfo("  GPU Depth: N/A (timestamp profiler unavailable)");
-
-        // CPU와 동일하게 마지막으로 완료된 프레임을 표시한다.
         const auto& Stats = ShadowStats::Completed;
-        AddInfo("Shadow Workload (frame, all views)", TitleColor);
-        AddInfo(std::format("  Draw Calls {} | Triangles {}", Stats.DrawCalls, Stats.Triangles));
-        AddInfo(std::format("  Tile Clear Draws {} (included above)", Stats.TileClearDraws));
-        AddInfo(std::format("  Caster Submissions {} | Passes {}", Stats.CasterSubmissions, Stats.Passes));
-        AddInfo(std::format("  Passes D/CSM/Point Faces/Spot Tiles: {}/{}/{}/{}",
-            Stats.DirectionalPasses, Stats.CascadePasses, Stats.PointFaces, Stats.SpotTiles));
-        AddInfo(std::format("  Depth Clears {} (not Draw Calls)", Stats.DepthClears));
-        AddInfo(std::format("  Casting Lights D/P/S (light-view counts): {}/{}/{}",
-            Stats.EligibleLights[0], Stats.EligibleLights[1], Stats.EligibleLights[2]));
-        AddInfo(std::format("  Map Updates D/P/S (light-view counts): {}/{}/{}",
-            Stats.UpdatedLights[0], Stats.UpdatedLights[1], Stats.UpdatedLights[2]));
-        AddInfo(std::format("  Views {} | Shadow Views {} | CSM Views {}",
-            Stats.Views, Stats.ShadowViews, Stats.CSMViews));
-
-        AddInfo("Shadow Resources (resident, shared across views)", TitleColor);
-        if (Stats.bResourcesAvailable)
+        AddInfo(std::format("Shadow | {:.1f} FPS | {} View(s)", FStatOverlay::GetFPS(), Stats.Views), TitleColor);
+        AddInfo("Avg: 120 frames | Max: since Reset", IM_COL32(175, 180, 190, 255));
+        ProfileLines.Add({"Time (ms)", TitleColor, {"Last", "Avg", "Max"}});
+        const auto& Frame = FStatOverlay::GetFrameTiming();
+        ProfileLines.Add({"  Frame", ValueColor, {
+            std::format("{:.2f}", Frame.GetLastMs()),
+            std::format("{:.2f}", Frame.GetRecentAverageMs()),
+            std::format("{:.2f}", Frame.GetMaxMs())}});
+        if (Stats.bGPUTimeAvailable)
         {
-            AddInfo(std::format("  CSM Cascades {} active (max/view), {} configured{}",
-                Stats.ActiveCascades, Stats.ConfiguredCascades, Stats.bCSMEnabled ? "" : " [Disabled]"));
-            AddInfo(std::format("  CSM Resolution {} x {} per cascade (allocated)",
-                Stats.CascadeResolution, Stats.CascadeResolution));
-            AddInfo(std::format("  CSM Shadow Distance {:.2f} world units (configured)", Stats.ShadowDistance));
-            AddInfo(std::format("  Directional Resolution {} x {}",
-                Stats.DirectionalResolution, Stats.DirectionalResolution));
-            const double Utilization = Stats.AtlasResolution > 0 ?
-                100.0 * static_cast<double>(Stats.AtlasAllocatedTexels) /
-                (static_cast<double>(Stats.AtlasResolution) * Stats.AtlasResolution) : 0.0;
-            AddInfo(std::format("  Atlas {} x {} | Tiles {} | Utilization {:.2f}%",
-                Stats.AtlasResolution, Stats.AtlasResolution, Stats.AtlasTiles, Utilization));
-            AddInfo(std::format("  Estimated Memory {:.2f} MB (previews {:.2f} MB)",
-                static_cast<double>(Stats.EstimatedBytes) / BytesPerMegabyte,
-                static_cast<double>(Stats.PreviewBytes) / BytesPerMegabyte));
+            ProfileLines.Add({"  Shadow Map GPU", ValueColor, {
+                std::format("{:.2f}", Stats.GPULastMs),
+                std::format("{:.2f}", Stats.GPUAverageMs),
+                std::format("{:.2f}", Stats.GPUMaxMs)}});
         }
         else
         {
-            AddInfo("  N/A (no completed resource snapshot)");
+            ProfileLines.Add({"  Shadow Map GPU", ValueColor, {"N/A", "N/A", "N/A"}});
         }
+        AddInfo("  GPU: delayed, depth maps only", IM_COL32(175, 180, 190, 255));
+        AddInfo("");
+        AddInfo("Shadow workload / resources", TitleColor);
+        const auto AddCurrent = [&ProfileLines](const char* Label, FString Value)
+        {
+            FProfileStatLine Line{"  " + FString(Label), ValueColor, {"", "", std::move(Value)}};
+            Line.bCurrentValue = true;
+            ProfileLines.Add(Line);
+        };
+        AddCurrent("Memory (estimated)", Stats.bResourcesAvailable ?
+            std::format("{:.1f} MB", static_cast<double>(Stats.EstimatedBytes) / BytesPerMegabyte) : "N/A");
+        AddCurrent("Lights D / P / S", std::format("{} / {} / {}", Stats.Lights[0], Stats.Lights[1], Stats.Lights[2]));
+        const uint64 Updates = uint64(Stats.UpdatedLights[0]) + Stats.UpdatedLights[1] + Stats.UpdatedLights[2];
+        const uint64 Skips = uint64(Stats.SkippedLights[0]) + Stats.SkippedLights[1] + Stats.SkippedLights[2];
+        AddCurrent("Updates / Skipped", std::format("{} / {}", Updates, Skips));
+        AddCurrent("Casters Culled / Tested", std::format("{} / {}", Stats.CastersCulled, Stats.CastersTested));
+        AddInfo("  Updates/light-view | Casters/query", IM_COL32(175, 180, 190, 255));
     }
 
-	if (const FCycleStatData* PickingData = FStatRegistry::Find(EditorStats::STAT_PickingTime))
+	if (FStatOverlay::IsEnabled(EStatFlags::Profile))
 	{
 		if (const FCycleStatData* PickingData = FStatRegistry::Find(EditorStats::STAT_PickingTime))
 		{
@@ -528,7 +506,7 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 	for (int32 Index = 0; Index < Lines.Num(); ++Index)
 		MaxWidth = std::max(MaxWidth, ImGui::CalcTextSize(Lines[Index].Text.c_str()).x);
 
-	const float MinValueWidth = ImGui::CalcTextSize("00000.00").x;
+	const float MinValueWidth = ImGui::CalcTextSize("000.00").x;
 	float NameWidth = 0.0f;
 	float ValueWidths[3] = { MinValueWidth, MinValueWidth, MinValueWidth };
 	bool bHasColumns = false;
@@ -539,6 +517,11 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 		if (Line.bFullWidth)
 		{
 			MaxWidth = std::max(MaxWidth, TextWidth);
+			continue;
+		}
+		if (Line.bCurrentValue)
+		{
+			MaxWidth = std::max(MaxWidth, TextWidth + ImGui::GetFontSize() + ImGui::CalcTextSize(Line.Values[2].c_str()).x);
 			continue;
 		}
 		bHasColumns = true;
@@ -582,6 +565,12 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 		DrawList->AddText({ Origin.x, Y }, Line.Color, Line.Text.c_str());
 		if (Line.bFullWidth)
 			continue;
+		if (Line.bCurrentValue)
+		{
+			const FString& Text = Line.Values[2];
+			DrawList->AddText({Origin.x + MaxWidth - ImGui::CalcTextSize(Text.c_str()).x, Y}, Line.Color, Text.c_str());
+			continue;
+		}
 
 		for (int32 Column = 0; Column < 3; ++Column)
 		{

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "LightweightStats.h"
+#include <unordered_map>
+#include <unordered_set>
 
 namespace ShadowStats
 {
@@ -27,6 +29,14 @@ struct FFrameData
     uint32 ShadowViews = 0;
     uint32 EligibleLights[3] = {}; // Directional / Point / Spot, CastShadow 및 Intensity > 0
     uint32 UpdatedLights[3] = {};  // 이번 프레임에 맵을 갱신한 광원-View 수 (초기화 포함)
+    uint32 SkippedLights[3] = {};  // 실제 분기에서 갱신하지 않은 광원-View 수. Point 6면은 1회.
+    uint32 Lights[3] = {};        // 프레임에 등장한 고유 그림자 광원 D/P/S (View 중복 제외)
+    uint64 CastersTested = 0;     // 실제 쿼리의 적격 후보 수. Cascade/Face/View별 중복 포함.
+    uint64 CastersCulled = 0;
+    bool bGPUTimeAvailable = false;
+    double GPULastMs = 0.0;
+    double GPUAverageMs = 0.0;
+    double GPUMaxMs = 0.0;
     uint32 ActiveCascades = 0;     // View별 활성 개수의 최댓값
     uint32 CSMViews = 0;
     uint32 CascadeResolution = 0;
@@ -44,10 +54,26 @@ struct FFrameData
 
 inline FFrameData Pending;
 inline FFrameData Completed;
+inline std::unordered_set<const void*> SeenLights;
+inline std::unordered_map<const void*, uint64> CasterCandidates;
 
 inline void BeginFrame()
 {
     Pending = {};
+    SeenLights.clear();
+    CasterCandidates.clear();
+}
+
+inline void RecordLight(const void* Light, uint32 Type)
+{
+    if (Light && Type < 3 && SeenLights.insert(Light).second)
+        ++Pending.Lights[Type];
+}
+
+inline void RecordCasterQuery(uint64 Candidates, uint64 Retained)
+{
+    Pending.CastersTested += Candidates;
+    Pending.CastersCulled += Candidates > Retained ? Candidates - Retained : 0;
 }
 
 inline void EndFrame()

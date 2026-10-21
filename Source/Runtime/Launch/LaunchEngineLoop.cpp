@@ -16,6 +16,7 @@
 #include "Render/Texture2D.h"
 #include "Core/SplashScreen.h"
 #include "Core/Stats/LightweightStats.h"
+#include "Core/Stats/StatOverlay.h"
 #include "Core/Async/TaskPool.h"
 
 #include "UObject/UObjectGlobals.h"
@@ -279,6 +280,7 @@ void FEngineLoop::DestroyAllObjectsExceptEngine()
 
 void FEngineLoop::UpdateFrameStats(uint64 FrameCycles)
 {
+	FStatOverlay::RecordFrame(FrameCycles);
 	FrameStats.LastFrameMs = FPlatformTime::ToMilliseconds64(FrameCycles);
 
 	StatsWindowCycles += FrameCycles;

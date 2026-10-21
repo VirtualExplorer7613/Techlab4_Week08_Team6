@@ -423,8 +423,7 @@ void UEditorEngine::Tick(const float DeltaTime)
 // DeltaTime을 패널에 전달하고 에디터 단축키를 처리한다.
 void UEditorEngine::BeginFrame(const float DeltaTime)
 {
-	ShadowStats::BeginFrame();
-	FStatOverlay::Tick(DeltaTime);
+	Renderer->BeginShadowStatsFrame();
 	EditorControlsPanel->FEditorControlsPanel::DeltaTime = DeltaTime;
 
 	if (!ImGui::GetIO().WantTextInput && FInputSystem::IsKeyPressed(EKeyCode::Delete))
@@ -1080,6 +1079,7 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
     const FCameraProjection Projection = MultipleViewportsAdapter.GetRenderProjection(ViewIndex);
     const bool bRenderShadows = ViewMode != EViewMode::Unlit && MultipleViewportsAdapter.IsShowFlagEnabled(ViewIndex, EShowFlags::Shadows);
 	Renderer->SetShadowsEnabled(bRenderShadows && bHasVisibleShadowReceiver);
+    Renderer->RecordShadowSceneStats(ViewWorld.GetScene());
 
     if (bRenderShadows)
     {

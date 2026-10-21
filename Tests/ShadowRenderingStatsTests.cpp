@@ -1,7 +1,10 @@
 #include "EnginePCH.h"
 #include "Asset/AssetManager.h"
 #include "Component/StaticMeshComponent.h"
+#include "Component/DirectionalLightComponent.h"
+#include "Component/SpotLightComponent.h"
 #include "Core/Stats/ShadowStats.h"
+#include "Core/Stats/StatOverlay.h"
 #include "Engine/Scene.h"
 #include "Render/RenderCommand.h"
 #include "Render/RenderResourceManager.h"
@@ -46,6 +49,8 @@ int main()
     try
     {
         FPlatformTime::InitTiming();
+        FString StatMessage;
+        FStatOverlay::ExecCommand("stat shadow", StatMessage);
         FRenderDevice Device;
         Check(Device.GetDevice() && Device.GetContext(), "D3D11 device");
         RenderCommand::Init(&Device);
@@ -65,6 +70,15 @@ int main()
         Cube->SetStaticMesh(UAssetManager::GetAssetByPath<UStaticMesh>("Cube"));
         Cube->SetRelativeLocation(FVector(5.0f, 0.0f, 0.0f));
         Scene.AddPrimitive(Cube);
+        auto* OutsideCube = NewObject<UStaticMeshComponent>();
+        OutsideCube->SetStaticMesh(UAssetManager::GetAssetByPath<UStaticMesh>("Cube"));
+        OutsideCube->SetRelativeLocation(FVector(5000.0f, 0.0f, 0.0f));
+        Scene.AddPrimitive(OutsideCube);
+        auto* NonCaster = NewObject<UStaticMeshComponent>();
+        NonCaster->SetStaticMesh(UAssetManager::GetAssetByPath<UStaticMesh>("Cube"));
+        NonCaster->SetRelativeLocation(FVector(5000.0f, 0.0f, 0.0f));
+        NonCaster->SetCastShadows(false);
+        Scene.AddPrimitive(NonCaster);
         Scene.UpdateAllTransforms();
         const auto* Proxy = Cube->GetSceneProxy();
         Check(Proxy && Proxy->GetRenderState(), "cube proxy");
@@ -95,6 +109,8 @@ int main()
             "point mesh draws plus tile clear");
         Check(ShadowStats::Pending.Triangles == MeshTriangles + 1 && ShadowStats::Pending.CasterSubmissions == 1,
             "point triangles and caster submission");
+        Check(ShadowStats::Pending.CastersTested == 12 && ShadowStats::Pending.CastersCulled == 11,
+            "six point queries count two eligible casters, not CastShadow-off object");
         Renderer->RecordShadowViewStats(true);
         Renderer->CompleteShadowStatsFrame();
         Check(ShadowStats::Completed.AtlasTiles == 1 && ShadowStats::Completed.UpdatedLights[1] == 1,
@@ -105,6 +121,8 @@ int main()
         CheckSubmittedTriangles(RenderAtlas);
         Check(ShadowStats::Pending.DrawCalls == 0 && ShadowStats::Pending.Passes == 0,
             "cache hit has no shadow draw pass");
+        Check(ShadowStats::Pending.CastersTested == 0 && ShadowStats::Pending.CastersCulled == 0 &&
+            ShadowStats::Pending.SkippedLights[1] == 1, "cache reuse skips light update, not caster culling");
         Renderer->RecordShadowViewStats(true);
         Renderer->CompleteShadowStatsFrame();
         Check(ShadowStats::Completed.AtlasTiles == 1 && ShadowStats::Completed.UpdatedLights[1] == 0,
@@ -129,6 +147,18 @@ int main()
         const uint64 InnerSize = static_cast<uint64>(std::round(Spot.AtlasScaleOffset.X * ShadowStats::Completed.AtlasResolution));
         Check(ShadowStats::Completed.AtlasAllocatedTexels == (InnerSize + 2 * SHADOW_ATLAS_BORDER) *
             (InnerSize + 2 * SHADOW_ATLAS_BORDER), "spot resource area includes border");
+
+        // 다른 활성 광원 때문에 전체 조기 반환을 통과해도 밝기 0인 광원은 집계하지 않는다.
+        Lights->SpotLightCount = 2;
+        Lights->SpotLights[1] = Lights->SpotLights[0];
+        Lights->SpotLights[1].ColorIntensity.W = 0.0f;
+        Renderer->SetLight(*Lights);
+        ShadowStats::BeginFrame();
+        RenderAtlas();
+        Check(ShadowStats::Pending.UpdatedLights[2] + ShadowStats::Pending.SkippedLights[2] == 1,
+            "zero-intensity spot excluded even when another active light enters atlas pass");
+        Lights->SpotLightCount = 1;
+        Renderer->SetLight(*Lights);
 
         // Receiver 없음에 대응하는 기존 진입 조건: 깊이 렌더링은 생략하고 Light Buffer는 갱신한다.
         Renderer->SetShadowsEnabled(false);
@@ -156,6 +186,8 @@ int main()
         ShadowStats::BeginFrame();
         CheckSubmittedTriangles(RenderAtlas);
         Check(ShadowStats::Pending.Passes == 0, "tiny screen light skips shadow pass");
+        Check(ShadowStats::Pending.SkippedLights[2] == 1 && ShadowStats::Pending.CastersTested == 0,
+            "small light skip counted at light stage without invented caster queries");
 
         Lights->SpotLightCount = 0;
         Lights->DirectionalLight.ColorIntensity = FVector4(1.0f);
@@ -190,13 +222,73 @@ int main()
         CheckSubmittedTriangles([&]() { RenderDirectional(false); RenderDirectional(true); });
         Check(ShadowStats::Pending.DirectionalPasses == 2 && ShadowStats::Pending.Views == 2 &&
             ShadowStats::Pending.ActiveCascades == 0, "multi-view directional and orthographic");
-        Check(ShadowStats::Pending.CasterSubmissions == 2, "caster submissions repeated across views");
+        Check(ShadowStats::Pending.CasterSubmissions == 3, "orthographic submits unculled distant caster, perspective culls it");
         Renderer->CompleteShadowStatsFrame();
         Check(ShadowStats::Completed.EstimatedBytes == CSMMemory, "disabled CSM resource remains allocated");
 
+        auto* Directional = NewObject<UDirectionalLightComponent>();
+        auto* SpotLight = NewObject<USpotLightComponent>();
+        auto* DisabledPoint = NewObject<UPointLightComponent>();
+        DisabledPoint->SetCastShadows(false);
+        Scene.RegisterLightComponent(Directional);
+        Scene.RegisterLightComponent(SpotLight);
+        Scene.RegisterLightComponent(DisabledPoint);
+        ShadowStats::BeginFrame();
+        Renderer->RecordShadowSceneStats(Scene);
+        Renderer->RecordShadowSceneStats(Scene);
+        Check(ShadowStats::Pending.Lights[0] == 1 && ShadowStats::Pending.Lights[1] == 0 &&
+            ShadowStats::Pending.Lights[2] == 1, "real light types are counted uniquely across views");
+        Scene.UnRegisterLightComponent(Directional);
+        Scene.UnRegisterLightComponent(SpotLight);
+        Scene.UnRegisterLightComponent(DisabledPoint);
+        delete Directional;
+        delete SpotLight;
+        delete DisabledPoint;
+
+        // 실제 Renderer의 Depth 구간이 비동기 GPU 표본으로 게시되는지 확인한다.
+        const auto WaitForGPU = [&](bool bRenderDepth)
+        {
+            ComPtr<ID3D11Query> Done;
+            const D3D11_QUERY_DESC EventDesc{D3D11_QUERY_EVENT, 0};
+            Check(SUCCEEDED(RenderCommand::GetDevice()->CreateQuery(&EventDesc, Done.GetAddressOf())), "test completion query");
+            const uint64 Start = GetTickCount64();
+            do
+            {
+                Renderer->BeginShadowStatsFrame();
+                if (bRenderDepth)
+                    RenderDirectional(false);
+                Renderer->CompleteShadowStatsFrame();
+                // Present 없는 테스트가 GPU보다 빠르게 8개 슬롯을 채우지 않도록 프레임 완료를 기다린다.
+                auto* Context = RenderCommand::GetContext();
+                Context->End(Done.Get());
+                while (Context->GetData(Done.Get(), nullptr, 0, 0) == S_FALSE)
+                {
+                    Check(GetTickCount64() - Start < 5000, "test GPU completion timeout");
+                    SwitchToThread();
+                }
+                const auto& Data = ShadowStats::Completed;
+                if (Data.bGPUTimeAvailable && (bRenderDepth || Data.GPULastMs == 0.0))
+                {
+                    Check(std::isfinite(Data.GPULastMs) && Data.GPULastMs >= 0.0, "renderer GPU timestamp result");
+                    return;
+                }
+                SwitchToThread();
+            } while (GetTickCount64() - Start < 5000);
+            Check(false, bRenderDepth ? "renderer GPU depth stats timeout" : "renderer GPU zero stats timeout");
+        };
+        WaitForGPU(true);
+        WaitForGPU(false);
+        Renderer->BeginShadowStatsFrame();
+        RenderDirectional(false);
+        FStatOverlay::ResetSamples(); // 실제 Reset 버튼과 같은 프레임 중간 초기화
+        Renderer->CompleteShadowStatsFrame();
+        Check(!ShadowStats::Completed.bGPUTimeAvailable, "mid-frame Reset must discard previously available GPU sample");
+
         Scene.RemoveAllPrimitives();
         delete Cube;
-        std::cout << "PASS: actual D3D11 triangles, point partial faces/cache, spot border, skipping, CSM, ortho, multi-view, memory\n";
+        delete OutsideCube;
+        delete NonCaster;
+        std::cout << "PASS: D3D11 triangles, caster culling/cache, mixed lights, CSM/ortho, unique lights, memory, renderer GPU timing/zero\n";
         return 0;
     }
     catch (const std::exception& Error)

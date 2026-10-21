@@ -2,6 +2,7 @@
 
 #include "Core/Types.h"
 #include "Core/EngineString.h"
+#include "LightweightStats.h"
 
 // Overlay로 표시할 Stat 항목. 여러 항목을 동시에 켤 수 있어 비트 플래그로 둔다.
 enum class EStatFlags : uint32
@@ -22,6 +23,24 @@ public:
 	// 프레임마다 호출해 FPS 평균 창을 누적하고 표시 수치를 갱신한다.
 	static void Tick(float DeltaTime);
 
+	// Present를 포함한 실제 프레임 간격. EngineTimer의 DeltaTime clamp를 거치지 않는다.
+	static void RecordFrame(uint64 Cycles)
+	{
+		FrameTiming.PushFrame(Cycles);
+		Tick(static_cast<float>(FPlatformTime::ToSeconds64(Cycles)));
+	}
+	static const FCycleStatData& GetFrameTiming() { return FrameTiming; }
+	static uint64 GetResetGeneration() { return ResetGeneration; }
+	static void ResetSamples()
+	{
+		FStatRegistry::Reset();
+		FrameTiming = {};
+		AccumulatedTime = 0.0f;
+		AccumulatedFrames = 0;
+		DisplayFPS = DisplayFrameTimeMs = 0.0f;
+		++ResetGeneration;
+	}
+
 	// "stat ..." 명령을 해석한다.
 	// stat 명령이 아니면 false를 반환해 호출자가 나머지 명령 처리를 이어가게 한다.
 	static bool ExecCommand(const FString& CommandLine, FString& OutMessage);
@@ -41,6 +60,8 @@ public:
 	static uint64 GetProcessWorkingSetBytes();
 
 private:
+	inline static FCycleStatData FrameTiming;
+	inline static uint64 ResetGeneration = 0;
 	// 표시 수치 갱신 주기(초). 너무 짧으면 숫자가 읽히지 않는다.
 	static constexpr float SampleInterval = 0.25f;
 
