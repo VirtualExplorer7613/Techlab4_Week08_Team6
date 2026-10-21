@@ -415,7 +415,7 @@ float PCSS(Texture2DArray<float> ShadowMap, float slice, float4 shadowPos, float
     return PCSSPCF(ShadowMap, slice, shadowPos, bias, invMapSize, AtlasScaleOffset, PenumbraTexel, TransitionScale);
 }
 
-float ShadowFiltering2D(Texture2DArray<float> ShadowMap, float slice, float2 texelSize, float4 shadowPos, float bias, float invMapSize, float TransitionScale, float4 AtlasScaleOffset, float4 PCSSParams)
+float ShadowFiltering2D(Texture2DArray<float> ShadowMap, float slice, float4 shadowPos, float bias, float invMapSize, float TransitionScale, float4 AtlasScaleOffset, float4 PCSSParams)
 {   
     float visibility = 0.0f;
 
@@ -484,10 +484,7 @@ float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint
         return 1.0f;
     }
 
-    float near = PointLights[index].ShadowFilterParameters.w;
-    float far = PointLights[index].PositionRadius.w;
     float viewDepth = max(abs(lightToPixel.x), max(abs(lightToPixel.y), abs(lightToPixel.z)));
-    float projDepth = far / (far - near) - (near * far) / ((far - near) * viewDepth);
 
     uint faceIndex = 0;
     
@@ -535,11 +532,6 @@ float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint
 
     shadowPos.xy = shadowPos.xy * PointLights[index].AtlasScaleOffset[faceIndex].xy + PointLights[index].AtlasScaleOffset[faceIndex].zw;
 
-    if (PointLights[index].ShadowParameters.w == 0.0f || bReceiveShadow == 0)
-    {
-        return 1.0f;
-    }
-    
     float NdotL = saturate(dot(normal, -normalize(lightToPixel).xyz));
     float2 texelSize = float2(PointLights[index].ShadowParameters.z, PointLights[index].ShadowParameters.z);
     float bias = PointLights[index].ShadowParameters.x + PointLights[index].ShadowParameters.y * (1.0f - NdotL);
@@ -548,7 +540,7 @@ float CalculatePointShadow(float3 worldPos, float3 lightPos, float3 normal, uint
     float penumbraScale = PointLights[index].ShadowFilterParameters.z * tileTexel / (2.0f * tanHalfFov);
     float4 pcssParams = float4(penumbraScale, PointLights[index].ShadowFilterParameters.w, PointLights[index].PositionRadius.w, 1.0f);
     
-    return ShadowFiltering2D(ShadowMapAtlas, 0.0f, texelSize, shadowPos, bias, invMapSize, TransitionScale, PointLights[index].AtlasScaleOffset[faceIndex], pcssParams);
+    return ShadowFiltering2D(ShadowMapAtlas, 0.0f, shadowPos, bias, invMapSize, TransitionScale, PointLights[index].AtlasScaleOffset[faceIndex], pcssParams);
 }
 
 FLightResult CalculatePointLight(FPointLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
@@ -601,11 +593,6 @@ float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLight
     }
 
     shadowPos.xy = shadowPos.xy * SpotLights[index].AtlasScaleOffset.xy + SpotLights[index].AtlasScaleOffset.zw;
-
-    if (SpotLights[index].ShadowParameters.w == 0.0f || bReceiveShadow == 0)
-    {
-        return 1.0f;
-    }
     
     float2 texelSize = float2(SpotLights[index].ShadowParameters.z, SpotLights[index].ShadowParameters.z);
 
@@ -622,7 +609,7 @@ float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLight
     float penumbraScale = info.ShadowFilterParameters.z * tileTexel / (2.0f * tanHalfFov);
     float4 pcssParams = float4(penumbraScale, info.ShadowFilterParameters.w, info.PositionRadius.w, 1.0f);
 
-    return ShadowFiltering2D(ShadowMapAtlas, 0.0f, texelSize, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y, info.AtlasScaleOffset, pcssParams);
+    return ShadowFiltering2D(ShadowMapAtlas, 0.0f, shadowPos, bias, info.ShadowParameters.z, info.ShadowFilterParameters.y, info.AtlasScaleOffset, pcssParams);
 }
 
 FLightResult CalculateSpotLight(FSpotLightInfo info, float3 worldPos, float3 normal, float3 viewDir, uint index)
@@ -756,7 +743,7 @@ float ApplyCascadeShadowBlend(float3 worldPos, uint cascadeIndex, float currentV
     float2 texelSize = float2(CascadeInvResolution, CascadeInvResolution);
 
     float4 pcssParams = DirectionalPCSSParams(CascadeLightVP[nextIndex], CascadeInvResolution, DirectionalLight.ShadowFilterParameters.z);
-    float nextVisibility = ShadowFiltering2D(CascadeShadowMap, (float) nextIndex, texelSize, nextPos, bias, CascadeInvResolution, DirectionalLight.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
+    float nextVisibility = ShadowFiltering2D(CascadeShadowMap, (float) nextIndex, nextPos, bias, CascadeInvResolution, DirectionalLight.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
     // 현재 픽셀이 전환 구간을 얼마나 지나왔는지 0~1로 계산
     float t = saturate((viewDepth - blendStart) / (blendEnd - blendStart));
     
@@ -812,13 +799,13 @@ float CalculateDirectionalShadow(float3 worldPos, float3 normal, FDirectionalLig
     if (useCascade)
     {
         float4 pcssParams = DirectionalPCSSParams(CascadeLightVP[cascadeIndex], invResolution, info.ShadowFilterParameters.z);
-        visibility = ShadowFiltering2D(CascadeShadowMap, (float) cascadeIndex, texelSize, shadowPos, bias, invResolution, info.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
+        visibility = ShadowFiltering2D(CascadeShadowMap, (float) cascadeIndex, shadowPos, bias, invResolution, info.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
         visibility = ApplyCascadeShadowBlend(worldPos, cascadeIndex, visibility, bias);
     }
     else
     {
         float4 pcssParams = DirectionalPCSSParams(DirectionalLight.LightVP, invResolution, info.ShadowFilterParameters.z);
-        visibility = ShadowFiltering2D(DirectionalShadowMap, 0.0f, texelSize, shadowPos, bias, invResolution, info.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
+        visibility = ShadowFiltering2D(DirectionalShadowMap, 0.0f, shadowPos, bias, invResolution, info.ShadowFilterParameters.y, float4(1.0f, 1.0f, 0.0f, 0.0f), pcssParams);
     }
     
     return visibility;
