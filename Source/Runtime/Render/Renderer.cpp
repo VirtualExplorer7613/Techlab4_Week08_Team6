@@ -955,14 +955,15 @@ void FRenderer::BindLightResources()
 	Context->VSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 	Context->PSSetShaderResources(LightSRVSlot, 2, LightSRVs);
 
-    RenderCommand::BindShaderResource(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindShaderResource(14, GetShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindSamplerState(1, ESamplerState::PointBorder, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindSamplerState(2, ESamplerState::LinearComparison, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    RenderCommand::BindConstantBuffer(5, CascadeDebugCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
-    ID3D11ShaderResourceView *CascadeSRV = CascadeShadowMaps.GetArraySRV();
+    RenderCommand::BindShaderResourceArray(10, GetDirectionalShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindShaderResourceArray(14, GetShadowMap(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    
+    ID3D11ShaderResourceView* CascadeSRV = CascadeShadowMaps.GetArraySRV();
     Context->VSSetShaderResources(13, 1, &CascadeSRV);
     Context->PSSetShaderResources(13, 1, &CascadeSRV);
+
+    RenderCommand::BindSamplerState(1, ESamplerState::PointBorder, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
+    RenderCommand::BindConstantBuffer(5, CascadeDebugCB.get(), EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);   
 }
 
 void FRenderer::RenderOpaque(const FMatrix& ViewProjection, const EViewMode ViewMode, bool bDepthPrepassed)
@@ -1465,6 +1466,7 @@ void FRenderer::UploadLightGlobalConstants(const FMatrix &DirectionalLightVP)
     Globals.SpotLightCount = LightData.SpotLightCount;
     Globals.bShowShadows = bShadowsEnabled ? 1u : 0u;
     Globals.ShadowQuality = ShadowQuality;
+    Globals.PCSSMaxKernel = PCSSMaxKernel;
 
     RenderCommand::UpdateBufferData(LightCB.get(), &Globals, sizeof(FLightGlobalConstants));
 }
@@ -1826,7 +1828,7 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
         FVector LightPosition = { LightData.PointLights[i].PositionRadius.X, LightData.PointLights[i].PositionRadius.Y, LightData.PointLights[i].PositionRadius.Z };
 
         const float Far = LightData.PointLights[i].PositionRadius.W;
-        const float Near = 0.1f;
+        const float Near = LightData.PointLights[i].ShadowFilterParameters.W;
 
         FShadowAtlasTile ShadowAtlasTile;
         
