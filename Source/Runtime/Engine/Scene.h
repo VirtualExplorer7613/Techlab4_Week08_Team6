@@ -50,6 +50,8 @@ public:
 	TArray<FPrimitiveSceneProxy*> RenderStateDirtyProxies;
 	TArray<FAABB> PrimitiveBounds;
 	TArray<uint8> PrimitiveFlags;
+
+	mutable TArray<FAABB> ShadowDirtyBounds;
 	
 	TArray<FExponentialHeightFogSceneInfo> FogInfos;
 

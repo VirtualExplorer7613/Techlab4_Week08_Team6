@@ -507,9 +507,47 @@ private:
     FCSMSettings PendingCSMSettings;
     bool bHasPendingCSMSettings = false;
 
+    bool bShadowAtlasInitialCleared = false;
+
     // Shadow resolution quallity
     EShadowResolutionQuality ShadowResolutionQuality = EShadowResolutionQuality::High;
 
+public:
+    void InvalidSpotCache(uint32 Index)
+    {
+        if(SpotShadowCaches[Index].bIsValid)
+        {
+            if(!ShadowRenderer)
+            {
+                return;
+            }
+            ShadowRenderer->GetShadowAtlasAllocator().Free(SpotShadowCaches[Index].CachedTile.NodeIndex);
+            SpotShadowCaches[Index].CachedTile.NodeIndex = -1;
+            SpotShadowCaches[Index].bIsValid = false;
+            SpotShadowCaches[Index].bIsDirty = true;
+        }
+    }
+
+    void InvalidPointCache(uint32 Index)
+    {
+        if(PointShadowCaches[Index].bIsValid)
+        {
+            if(!ShadowRenderer)
+            {
+                return;
+            }
+
+            for(uint32 face = 0; face < 6; face++)
+            {
+                ShadowRenderer->GetShadowAtlasAllocator().Free(PointShadowCaches[Index].CachedTiles[face].NodeIndex);
+                PointShadowCaches[Index].CachedTiles[face].NodeIndex = -1;
+            } 
+            PointShadowCaches[Index].bIsValid = false;
+            PointShadowCaches[Index].bIsDirty = true;
+        }
+    }
+
+private:
     // Cached Shadows(Spot, Point)
     FSpotShadowCache SpotShadowCaches[NUM_SPOT_LIGHT];
     FPointShadowCache PointShadowCaches[NUM_POINT_LIGHT];

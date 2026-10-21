@@ -288,6 +288,7 @@ bool FShadowRenderer::Init(uint32 ShadowMapSize)
         return false;
     }
 
+    RenderCommand::GetContext()->ClearDepthStencilView(ShadowMapAtlas->GetDSV(), D3D11_CLEAR_DEPTH, 1.0f, 0);
     ShadowAtlasAllocator.Init(SHADOW_ATLAS_MAP_SIZE);
 
     return true;
@@ -298,7 +299,7 @@ bool FShadowRenderer::BeginShadowPass(const FShadowPassDesc &Desc)
     if (!Desc.DepthView || Desc.Width == 0 || Desc.Height == 0)
         return false;
 
-    if(Desc.DepthView)
+    if(Desc.DepthView && Desc.bClearDepth)
     {
         RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
     }

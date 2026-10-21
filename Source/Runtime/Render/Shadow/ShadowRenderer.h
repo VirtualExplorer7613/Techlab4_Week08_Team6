@@ -37,6 +37,7 @@ struct FShadowPassDesc
     uint32 Height = 0;
     uint32 X = 0;
     uint32 Y = 0;
+    bool bClearDepth = true;
 };
 
 const FCubeFaceDirection CubeFaceDirections[6] = {
