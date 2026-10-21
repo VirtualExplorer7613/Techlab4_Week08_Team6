@@ -157,6 +157,31 @@ struct FCSMSettings
     }
 };
 
+struct FShadowCache
+{
+    bool bIsValid = false;
+    bool bIsDirty = true;
+    uint32 CachedSize = 0;    
+    float PrevNearPlane = 0.0f; // ShadowFilterParameter.W
+    FVector4 PrevPositionRadius;
+};
+
+struct FPointShadowCache : public FShadowCache
+{    
+    FVector4 CachedScaleOffsets[6];  
+    FMatrix PrevViewProjections[6];
+    FShadowAtlasTile CachedTiles[6];
+};
+
+struct FSpotShadowCache : public FShadowCache
+{
+    FVector4 CachedScaleOffset;    
+    FMatrix PrevViewProjection;
+    FShadowAtlasTile CachedTile;
+    FVector PrevForwardVector;
+    FVector2 PrevAngle;
+};
+
 class FRenderer
 {
 public:
@@ -476,4 +501,8 @@ private:
 
     // Shadow resolution quallity
     EShadowResolutionQuality ShadowResolutionQuality = EShadowResolutionQuality::High;
+
+    // Cached Shadows(Spot, Point)
+    FSpotShadowCache SpotShadowCaches[NUM_SPOT_LIGHT];
+    FPointShadowCache PointShadowCaches[NUM_POINT_LIGHT];
 };

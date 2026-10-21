@@ -1476,9 +1476,6 @@ void FRenderer::SetLight(const FLightConstants &InLightData)
     LightData = InLightData;
 
     UploadLightGlobalConstants(LightData.DirectionalLight.ViewProjection);
-
-    //UploadDynamicBuffer(PointLightBuffer.Get(), LightData.PointLights, sizeof(FPointLight) * LightData.PointLightCount);
-    //UploadDynamicBuffer(SpotLightBuffer.Get(), LightData.SpotLights, sizeof(FSpotLight) * LightData.SpotLightCount);
 }
 
 void FRenderer::SetShadowsEnabled(bool bEnabled)
@@ -1652,7 +1649,7 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
                     CameraWorld.TransformPosition(LocalCorner);
             }
         }
-
+        
         // 카메라 위치·회전과 관계없이 일정한 반경을 사용한다.
         const float HalfDepth = (ShadowDistance - CameraNear) * 0.5f;
         const float FarHalfWidth = ShadowDistance * TanHalfFovX;
@@ -1998,5 +1995,9 @@ void FRenderer::CalculateShadowMapLOD(const FVector4 InPositionRadius, const FVe
     else if(Ratio > SHADOW_LOD_PIXEL_4)
     {
         OutRequestSize = SHADOW_LOD_LEVEL_4 >> ShadowQualityShift;
+    }
+    else
+    {
+        OutRequestSize = 0;
     }
 }

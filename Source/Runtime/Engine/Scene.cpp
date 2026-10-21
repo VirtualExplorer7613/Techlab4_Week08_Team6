@@ -192,59 +192,70 @@ void FScene::MarkRenderStateDirty(FPrimitiveSceneProxy *Proxy) {
   RenderStateDirtyProxies.Add(Proxy);
 }
 
-void FScene::UpdateLightComponents(FRenderer *Renderer) {
-  if (!Renderer)
-    return;
-
-  FLightConstants Constants{};
-  for (ULightComponentBase *LightComponent : LightComponents) {
-    if (!LightComponent)
-      continue;
-
-    // 라이트 액터 아이콘을 LightColor로 칠한다. Details 패널은 필드를 직접
-    // 바꾸므로 매 프레임 복사한다. 아이콘은 라이트 컴포넌트 자식으로 붙어 있고,
-    // 게임 빌드에서는 없을 수 있다.
-    for (USceneComponent *Child : LightComponent->GetAttachChildren()) {
-      if (UBillboardComponent *Billboard = Cast<UBillboardComponent>(Child)) {
-        Billboard->SetTint(LightComponent->GetLightColor());
-      }
+void FScene::UpdateLightComponents(FRenderer* Renderer) {
+    if(!Renderer)
+    {
+        return;
     }
 
-    UClass *LightClass = LightComponent->GetClass();
+    FLightConstants Constants{};
+    for(ULightComponentBase* LightComponent : LightComponents)
+    {
+        if(!LightComponent)
+        {
+            continue;
+        }
 
-    float TransitionFactor = Renderer->GetTransitionFactor();
+        // 라이트 액터 아이콘을 LightColor로 칠한다. Details 패널은 필드를 직접
+        // 바꾸므로 매 프레임 복사한다. 아이콘은 라이트 컴포넌트 자식으로 붙어 있고,
+        // 게임 빌드에서는 없을 수 있다.
+        for(USceneComponent* Child : LightComponent->GetAttachChildren())
+        {
+            if(UBillboardComponent* Billboard = Cast<UBillboardComponent>(Child))
+            {
+                Billboard->SetTint(LightComponent->GetLightColor());
+            }
+        }
 
-    // SpotLight가 PointLight를 상속받기 때문에 먼저 검사해야 한다.
-    if (USpotLightComponent *SpotLightComponent =
-            Cast<USpotLightComponent>(LightComponent)) {
-      if (Constants.SpotLightCount >= NUM_SPOT_LIGHT) {
-        continue;
-      }
-      SpotLightComponent->SetShadowMapTexture(Renderer->GetShadowMap());
-      SpotLightComponent->SetLightIndex(Constants.SpotLightCount);
-      UpdateSpotLight(Constants, SpotLightComponent, TransitionFactor);
-      
-    } else if (UPointLightComponent *PointLightComponent =
-                   Cast<UPointLightComponent>(LightComponent)) {        
-      if (Constants.PointLightCount >= NUM_POINT_LIGHT) {
-        continue;
-      }
-      PointLightComponent->SetShadowMapTexture(Renderer->GetShadowMap());
-      PointLightComponent->SetLightIndex(Constants.PointLightCount);
-      UpdatePointLight(Constants, PointLightComponent, TransitionFactor);
-    } else if (UAmbientLightComponent *AmbientLightComponent =
-                   Cast<UAmbientLightComponent>(LightComponent)) {
-      UpdateAmbientLight(Constants, AmbientLightComponent);
+        UClass* LightClass = LightComponent->GetClass();
+
+        float TransitionFactor = Renderer->GetTransitionFactor();
+
+        // SpotLight가 PointLight를 상속받기 때문에 먼저 검사해야 한다.
+        if(USpotLightComponent* SpotLightComponent = Cast<USpotLightComponent>(LightComponent))
+        {
+            if(Constants.SpotLightCount >= NUM_SPOT_LIGHT)
+            {
+                continue;
+            }
+            SpotLightComponent->SetShadowMapTexture(Renderer->GetShadowMap());
+            SpotLightComponent->SetLightIndex(Constants.SpotLightCount);
+            UpdateSpotLight(Constants, SpotLightComponent, TransitionFactor);
+
+        }
+        else if(UPointLightComponent* PointLightComponent = Cast<UPointLightComponent>(LightComponent))
+        {
+            if(Constants.PointLightCount >= NUM_POINT_LIGHT)
+            {
+                continue;
+            }
+            PointLightComponent->SetShadowMapTexture(Renderer->GetShadowMap());
+            PointLightComponent->SetLightIndex(Constants.PointLightCount);
+            UpdatePointLight(Constants, PointLightComponent, TransitionFactor);
+        }
+        else if(UAmbientLightComponent* AmbientLightComponent = Cast<UAmbientLightComponent>(LightComponent))
+        {
+            UpdateAmbientLight(Constants, AmbientLightComponent);
+        }
+
+        else if(UDirectionalLightComponent* DirectionalLightComponent = Cast<UDirectionalLightComponent>(LightComponent))
+        {
+            DirectionalLightComponent->SetShadowMapTexture(Renderer->GetDirectionalShadowMap());
+            UpdateDirectionalLight(Constants, DirectionalLightComponent, TransitionFactor);
+        }
     }
 
-    else if (UDirectionalLightComponent *DirectionalLightComponent =
-                 Cast<UDirectionalLightComponent>(LightComponent)) {
-        DirectionalLightComponent->SetShadowMapTexture(Renderer->GetDirectionalShadowMap());
-        UpdateDirectionalLight(Constants, DirectionalLightComponent, TransitionFactor);
-    }
-  }
-
-  Renderer->SetLight(Constants);
+    Renderer->SetLight(Constants);
 }
 
 void FScene::PostUpdateLightComponents(FRenderer* Renderer)

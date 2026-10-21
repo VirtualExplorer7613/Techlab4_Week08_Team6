@@ -54,6 +54,7 @@ struct FShadowAtlasTile
     uint32 X = 0;
     uint32 Y = 0;
     uint32 Size = 0;
+    int32 NodeIndex = -1;
 };
 
 enum class EShadowNodeState
@@ -69,6 +70,7 @@ struct FShadowQuadNode
     uint32 Y = 0;
     uint32 Size = 0;
     EShadowNodeState ShdowNodeState = EShadowNodeState::Free;
+    int32 Parent = -1;
     int32 Children[4] = {-1, -1, -1, -1};
 };
 
@@ -82,7 +84,7 @@ struct FShadowFrustum
 class FShadowAtlasAllocator
 {
 public:
-    void Init(uint32 InAtlasSize, uint32 InMinTileSize = 128)
+    void Init(uint32 InAtlasSize, uint32 InMinTileSize = 64)
     {
         AtlasSize = InAtlasSize;
         MinTileSize = InMinTileSize;
@@ -101,6 +103,38 @@ public:
 
         // Root
         Nodes.Add({0, 0, AtlasSize, EShadowNodeState::Free});
+    }
+
+    void Free(int32 NodeIndex)
+    {
+        if(NodeIndex < 0 || NodeIndex >= Nodes.Num())
+        {
+            return;
+        }
+
+        Nodes[NodeIndex].ShdowNodeState = EShadowNodeState::Free;
+
+        int32 Parent = Nodes[NodeIndex].Parent;
+        if(Parent == -1)
+        {
+            return;
+        }
+
+        bool bIsAllFree = true;
+        for(int32 i = 0; i < 4; i++)
+        {
+            int32 Child = Nodes[Parent].Children[i];
+            if(Nodes[Child].ShdowNodeState != EShadowNodeState::Free)
+            {
+                bIsAllFree = false;
+                break;
+            }
+        }
+
+        if(bIsAllFree)
+        {
+            Free(Parent);
+        }
     }
 
     bool Allocate(uint32 RequestedSize, FShadowAtlasTile& OutTile)
@@ -151,6 +185,7 @@ private:
                 OutTile.X = Nodes[NodeIndex].X;
                 OutTile.Y = Nodes[NodeIndex].Y;
                 OutTile.Size = Nodes[NodeIndex].Size;
+                OutTile.NodeIndex = NodeIndex;
 
                 return true;
             }
@@ -164,12 +199,20 @@ private:
                     
                 for (uint32 i = 0; i < 4; i++)
                 {
-                    uint32 ChildX = ParentX + (i % 2) * ParentHalfSize;
-                    uint32 ChildY = ParentY + (i / 2) * ParentHalfSize;
-                    uint32 ChildSize = ParentHalfSize;
+                    if(Nodes[NodeIndex].Children[i] == -1)
+                    {
+                        uint32 ChildX = ParentX + (i % 2) * ParentHalfSize;
+                        uint32 ChildY = ParentY + (i / 2) * ParentHalfSize;
+                        uint32 ChildSize = ParentHalfSize;
 
-                    int32 ChildIndex = Nodes.Add({ChildX, ChildY, ChildSize, EShadowNodeState::Free});
-                    Nodes[NodeIndex].Children[i] = ChildIndex;
+                        int32 ChildIndex = Nodes.Add({ ChildX, ChildY, ChildSize, EShadowNodeState::Free, NodeIndex });
+                        Nodes[NodeIndex].Children[i] = ChildIndex;
+                    }
+                    else
+                    {
+                        int32 ChildIndex = Nodes[NodeIndex].Children[i];
+                        Nodes[ChildIndex].ShdowNodeState = EShadowNodeState::Free;
+                    }
                 }
             }
         }
@@ -233,6 +276,9 @@ public:
     FTexture2D* GetShadowMapAtlas() const { return ShadowMapAtlas.get(); }
 
     FShadowAtlasAllocator& GetShadowAtlasAllocator() { return ShadowAtlasAllocator; }
+
+    void ClearShadowTile(FShadowAtlasTile& TileToRemove);
+    void ClearShadowTile(uint32 InX, uint32 InY, uint32 InSize);
 
 private:
     FShadowAtlasAllocator ShadowAtlasAllocator;

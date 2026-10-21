@@ -3,6 +3,8 @@
 
 #include "Math/Frustum.h"
 #include "Render/RenderCommand.h"
+#include "Render/RenderResourceManager.h"
+#include "Render/Shader.h"
 
 #include <limits>
 
@@ -179,6 +181,49 @@ FMatrix FShadowRenderer::BuildPointLightVP(const FVector &LightPosition, float N
     return BuildPointLightView(LightPosition, FaceIndex) * BuildPointLightProjection(NearPlane, FarPlane, RequestedSize);
 }
 
+void FShadowRenderer::ClearShadowTile(FShadowAtlasTile& TileToRemove)
+{
+    ClearShadowTile(TileToRemove.X, TileToRemove.Y, TileToRemove.Size);
+}
+
+void FShadowRenderer::ClearShadowTile(uint32 InX, uint32 InY, uint32 InSize)
+{
+    if(InSize == 0)
+    {
+        return;
+    }
+
+    const FString ShaderPath = "Resources/Shader/AtlasDepthPreview.hlsl";
+    FShaderProgram* Program = FRenderResourceManager::GetShaderProgram(ShaderPath);
+
+    if(!Program || Program->SourcePath != ShaderPath || !Program->VertexShader || !Program->VertexShader->IsValid())
+    {
+        return;
+    }
+
+    SetShadowViewPort(InX, InY, InSize, InSize);
+
+    ID3D11DeviceContext* Context = RenderCommand::GetContext();
+    if(!Context)
+    {
+        return;
+    }
+
+    // Bind VS, Unbind PS
+    Context->VSSetShader(Program->VertexShader->GetShader(), nullptr, 0);
+    Context->PSSetShader(nullptr, nullptr, 0);
+    Context->IASetInputLayout(nullptr);
+
+    RenderCommand::SetRasterizerState(ERasterizerState::SolidNone);
+    RenderCommand::SetDepthStencilState(EDepthStencilState::AlwaysWrite);
+    RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    RenderCommand::Draw(3);
+
+    RenderCommand::SetRasterizerState(ERasterizerState::ShadowDepth);
+    RenderCommand::SetDepthStencilState(EDepthStencilState::Default);
+}
+
 bool FShadowRenderer::Init(uint32 ShadowMapSize)
 {
     D3D11_TEXTURE2D_DESC DirectionalDesc{};
@@ -253,8 +298,11 @@ bool FShadowRenderer::BeginShadowPass(const FShadowPassDesc &Desc)
     if (!Desc.DepthView || Desc.Width == 0 || Desc.Height == 0)
         return false;
 
-    RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
-
+    if(Desc.DepthView)
+    {
+        RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+    }
+    
     ID3D11DeviceContext *Context = RenderCommand::GetContext();
 
     // 컬러 타깃 없이 DepthView만 렌더링 대상으로 설정

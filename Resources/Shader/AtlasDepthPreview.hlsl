@@ -13,7 +13,7 @@ PS_INPUT mainVS(uint VertexID : SV_VertexID)
 {
     PS_INPUT Output;
     float2 UV = float2((VertexID << 1) & 2, VertexID & 2);
-    Output.pos = float4(UV * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), 0.0f, 1.0f);
+    Output.pos = float4(UV * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), 1.0f, 1.0f);
     Output.uv = UV;
     Output.col = float4(1, 1, 1, 1);
     return Output;
