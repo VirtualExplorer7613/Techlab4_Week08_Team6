@@ -12,6 +12,7 @@ public:
 
     uint32 GetResolution() const {return Resolution;}
     uint32 GetCascadeCount() const {return CascadeCount;}
+    ID3D11Texture2D* GetTexture() const { return Texture.Get(); }
 
     ID3D11DepthStencilView *GetSliceDSV(uint32 Index) const
     {

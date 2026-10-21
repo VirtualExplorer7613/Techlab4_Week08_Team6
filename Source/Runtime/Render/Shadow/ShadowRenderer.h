@@ -101,6 +101,8 @@ public:
     void Reset()
     {
         Nodes.Reset();
+        AllocatedTileCount = 0;
+        AllocatedTexels = 0;
 
         // Root
         Nodes.Add({0, 0, AtlasSize, EShadowNodeState::Free});
@@ -113,6 +115,11 @@ public:
             return;
         }
 
+        if (Nodes[NodeIndex].ShdowNodeState == EShadowNodeState::Occupied)
+        {
+            --AllocatedTileCount;
+            AllocatedTexels -= static_cast<uint64>(Nodes[NodeIndex].Size) * Nodes[NodeIndex].Size;
+        }
         Nodes[NodeIndex].ShdowNodeState = EShadowNodeState::Free;
 
         int32 Parent = Nodes[NodeIndex].Parent;
@@ -170,6 +177,9 @@ public:
         return MinTileSize;
     }
 
+    uint32 GetAllocatedTileCount() const { return AllocatedTileCount; }
+    uint64 GetAllocatedTexels() const { return AllocatedTexels; }
+
 private:
     bool AllocateNode(int32 NodeIndex, uint32 RequestedSize, FShadowAtlasTile& OutTile)
     {
@@ -183,6 +193,8 @@ private:
             if (Nodes[NodeIndex].Size == RequestedSize)
             {
                 Nodes[NodeIndex].ShdowNodeState = EShadowNodeState::Occupied;
+                ++AllocatedTileCount;
+                AllocatedTexels += static_cast<uint64>(Nodes[NodeIndex].Size) * Nodes[NodeIndex].Size;
                 OutTile.X = Nodes[NodeIndex].X;
                 OutTile.Y = Nodes[NodeIndex].Y;
                 OutTile.Size = Nodes[NodeIndex].Size;
@@ -237,6 +249,8 @@ private:
     TArray<FShadowQuadNode> Nodes;
     uint32 AtlasSize = 0;
     uint32 MinTileSize = 0;
+    uint32 AllocatedTileCount = 0;
+    uint64 AllocatedTexels = 0;
 };
 
 class FShadowRenderer

@@ -35,6 +35,8 @@ struct FCycleStatData
 
 	uint32 NextIndex = 0;
 	uint32 SampleCount = 0;
+	uint64 PendingCycles = 0;
+	uint32 PendingCalls = 0;
 
 	double GetLastMs() const { return FPlatformTime::ToMilliseconds64(LastCycles); }
 	double GetTotalMs() const { return FPlatformTime::ToMilliseconds64(TotalCycles); }
@@ -42,11 +44,11 @@ struct FCycleStatData
 	double GetRecentAverageMs() const { return SampleCount > 0 ? FPlatformTime::ToMilliseconds64(WindowSumCycles) / SampleCount : 0.0; }
 	double GetMaxMs() const { return FPlatformTime::ToMilliseconds64(MaxFrameCycles); }
 
-	void PushFrame(uint64 Cycles)
+	void PushFrame(uint64 Cycles, uint32 Calls = 1)
 	{
 		LastCycles = Cycles;
 		TotalCycles += Cycles;
-		CallCount++;
+		CallCount += Calls;
 
 		WindowSumCycles -= FrameCycles[NextIndex];
 		FrameCycles[NextIndex] = Cycles;
@@ -67,21 +69,26 @@ class FStatRegistry
 public:
 	static void EndFrame()
 	{
-		for (const auto& [Name, Cycles] : PendingStatCycles)
+		// 등록된 모든 항목에 프레임을 추가한다. 미호출 프레임도 평균 창에 포함한다.
+		for (auto& [Name, Data] : Stats)
 		{
-			Stats[Name].PushFrame(Cycles);
+			Data.PushFrame(Data.PendingCycles, Data.PendingCalls);
+			Data.PendingCycles = 0;
+			Data.PendingCalls = 0;
 		}
-		PendingStatCycles.Reset();
 	}
 
 	static void AddCycles(TStatId StatId, uint64 Cycles)
 	{
-		PendingStatCycles[StatId.GetName()] += Cycles;
+		if (!StatId.IsValidStat())
+			return;
+		FCycleStatData& Data = Stats[StatId.GetName()];
+		Data.PendingCycles += Cycles;
+		++Data.PendingCalls;
 	}
 
 	static void Reset()
 	{
-		PendingStatCycles.Reset();
 		for (auto& [Name, Data] : Stats)
 		{
 			Data = FCycleStatData{};
@@ -98,7 +105,6 @@ public:
 private:
 	inline static bool bEnabled = true;
 	inline static TMap<const char*, FCycleStatData> Stats;
-	inline static TMap<const char*, uint64> PendingStatCycles;
 };
 
 // 생성 시 시작 사이클을 기록하고, 스코프를 벗어날 때 경과 사이클을 FStatRegistry에 보고한다.

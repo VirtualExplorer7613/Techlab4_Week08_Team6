@@ -1,5 +1,6 @@
 #include "EnginePCH.h"
 #include "ShadowRenderer.h"
+#include "Core/Stats/ShadowStats.h"
 
 #include "Math/Frustum.h"
 #include "Render/RenderCommand.h"
@@ -219,6 +220,10 @@ void FShadowRenderer::ClearShadowTile(uint32 InX, uint32 InY, uint32 InSize)
     RenderCommand::SetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     RenderCommand::Draw(3);
+    // 타일 초기화도 실제 Depth Draw이지만 Caster 제출과는 구분한다.
+    ++ShadowStats::Pending.DrawCalls;
+    ++ShadowStats::Pending.Triangles;
+    ++ShadowStats::Pending.TileClearDraws;
 
     RenderCommand::SetRasterizerState(ERasterizerState::ShadowDepth);
     RenderCommand::SetDepthStencilState(EDepthStencilState::Default);
@@ -302,6 +307,7 @@ bool FShadowRenderer::BeginShadowPass(const FShadowPassDesc &Desc)
     if(Desc.DepthView && Desc.bClearDepth)
     {
         RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+        ++ShadowStats::Pending.DepthClears;
     }
     
     ID3D11DeviceContext *Context = RenderCommand::GetContext();

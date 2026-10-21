@@ -406,6 +406,7 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 		FString Text;
 		ImU32 Color;
 		FString Values[3];
+		bool bFullWidth = false;
 	};
 	TArray<FProfileStatLine> ProfileLines;
 	if (FStatOverlay::IsEnabled(EStatFlags::Profile))
@@ -419,10 +420,7 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 			if (StatId == EditorStats::STAT_PickingTime)
 				continue;
 
-			if (FStatOverlay::IsEnabled(EStatFlags::Shadow) &&
-				(StatId == ShadowStats::STAT_ShadowDirectional ||
-					StatId == ShadowStats::STAT_ShadowAtlas ||
-					StatId == ShadowStats::STAT_ShadowCSM))
+			if (FStatOverlay::IsEnabled(EStatFlags::Shadow) && ShadowStats::IsShadowStat(StatId))
 				continue;
 
 			FProfileStatLine Line{"  " + FString(Name), ValueColor};
@@ -435,9 +433,10 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 
     if (FStatOverlay::IsEnabled(EStatFlags::Shadow))
     {
-        ProfileLines.Add({"Shadow CPU (ms)", TitleColor, {"Last", "Avg", "Max"}});
+        ProfileLines.Add({"Shadow Performance (ms)", TitleColor, {"Last", "Avg", "Max"}});
 
-        const auto AddShadowStat = [&ProfileLines](const char *Label, TStatId StatId) {
+        const auto AddShadowStat = [&ProfileLines](const char *Label, TStatId StatId)
+        {
             const FCycleStatData *Data = FStatRegistry::Find(StatId);
 
             FProfileStatLine Line{"  " + FString(Label), ValueColor};
@@ -448,9 +447,58 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
             ProfileLines.Add(Line);
         };
 
-        AddShadowStat("Directional", ShadowStats::STAT_ShadowDirectional);
-        AddShadowStat("Atlas", ShadowStats::STAT_ShadowAtlas);
-        AddShadowStat("CSM", ShadowStats::STAT_ShadowCSM);
+        AddShadowStat("CPU Total", ShadowStats::STAT_ShadowTotal);
+        AddShadowStat("Directional CPU", ShadowStats::STAT_ShadowDirectional);
+        AddShadowStat("CSM CPU", ShadowStats::STAT_ShadowCSM);
+        AddShadowStat("Atlas CPU", ShadowStats::STAT_ShadowAtlas);
+
+        const auto AddInfo = [&ProfileLines](FString Text, ImU32 Color = ValueColor)
+        {
+            FProfileStatLine Line{std::move(Text), Color};
+            Line.bFullWidth = true;
+            ProfileLines.Add(Line);
+        };
+        AddInfo("  GPU Depth: N/A (timestamp profiler unavailable)");
+
+        // CPU와 동일하게 마지막으로 완료된 프레임을 표시한다.
+        const auto& Stats = ShadowStats::Completed;
+        AddInfo("Shadow Workload (frame, all views)", TitleColor);
+        AddInfo(std::format("  Draw Calls {} | Triangles {}", Stats.DrawCalls, Stats.Triangles));
+        AddInfo(std::format("  Tile Clear Draws {} (included above)", Stats.TileClearDraws));
+        AddInfo(std::format("  Caster Submissions {} | Passes {}", Stats.CasterSubmissions, Stats.Passes));
+        AddInfo(std::format("  Passes D/CSM/Point Faces/Spot Tiles: {}/{}/{}/{}",
+            Stats.DirectionalPasses, Stats.CascadePasses, Stats.PointFaces, Stats.SpotTiles));
+        AddInfo(std::format("  Depth Clears {} (not Draw Calls)", Stats.DepthClears));
+        AddInfo(std::format("  Casting Lights D/P/S (light-view counts): {}/{}/{}",
+            Stats.EligibleLights[0], Stats.EligibleLights[1], Stats.EligibleLights[2]));
+        AddInfo(std::format("  Map Updates D/P/S (light-view counts): {}/{}/{}",
+            Stats.UpdatedLights[0], Stats.UpdatedLights[1], Stats.UpdatedLights[2]));
+        AddInfo(std::format("  Views {} | Shadow Views {} | CSM Views {}",
+            Stats.Views, Stats.ShadowViews, Stats.CSMViews));
+
+        AddInfo("Shadow Resources (resident, shared across views)", TitleColor);
+        if (Stats.bResourcesAvailable)
+        {
+            AddInfo(std::format("  CSM Cascades {} active (max/view), {} configured{}",
+                Stats.ActiveCascades, Stats.ConfiguredCascades, Stats.bCSMEnabled ? "" : " [Disabled]"));
+            AddInfo(std::format("  CSM Resolution {} x {} per cascade (allocated)",
+                Stats.CascadeResolution, Stats.CascadeResolution));
+            AddInfo(std::format("  CSM Shadow Distance {:.2f} world units (configured)", Stats.ShadowDistance));
+            AddInfo(std::format("  Directional Resolution {} x {}",
+                Stats.DirectionalResolution, Stats.DirectionalResolution));
+            const double Utilization = Stats.AtlasResolution > 0 ?
+                100.0 * static_cast<double>(Stats.AtlasAllocatedTexels) /
+                (static_cast<double>(Stats.AtlasResolution) * Stats.AtlasResolution) : 0.0;
+            AddInfo(std::format("  Atlas {} x {} | Tiles {} | Utilization {:.2f}%",
+                Stats.AtlasResolution, Stats.AtlasResolution, Stats.AtlasTiles, Utilization));
+            AddInfo(std::format("  Estimated Memory {:.2f} MB (previews {:.2f} MB)",
+                static_cast<double>(Stats.EstimatedBytes) / BytesPerMegabyte,
+                static_cast<double>(Stats.PreviewBytes) / BytesPerMegabyte));
+        }
+        else
+        {
+            AddInfo("  N/A (no completed resource snapshot)");
+        }
     }
 
 	if (const FCycleStatData* PickingData = FStatRegistry::Find(EditorStats::STAT_PickingTime))
@@ -488,10 +536,15 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 	for (const FProfileStatLine& Line : ProfileLines)
 	{
 		const float TextWidth = ImGui::CalcTextSize(Line.Text.c_str()).x;
+		if (Line.bFullWidth)
+		{
+			MaxWidth = std::max(MaxWidth, TextWidth);
+			continue;
+		}
 		bHasColumns = true;
 		NameWidth = std::max(NameWidth, TextWidth);
 		for (int32 Column = 0; Column < 3; ++Column)
-			ValueWidths[Column] = std::max(MinValueWidth, ImGui::CalcTextSize(Line.Values[Column].c_str()).x);
+			ValueWidths[Column] = std::max(ValueWidths[Column], ImGui::CalcTextSize(Line.Values[Column].c_str()).x);
 	}
 
 	float ColumnRight[3]{};
@@ -527,6 +580,8 @@ void FViewportsPanel::DrawStatOverlay(ImDrawList* DrawList, const ImVec2& ViewMi
 		const FProfileStatLine& Line = ProfileLines[Index];
 		const float Y = Origin.y + LineHeight * static_cast<float>(Lines.Num() + Index);
 		DrawList->AddText({ Origin.x, Y }, Line.Color, Line.Text.c_str());
+		if (Line.bFullWidth)
+			continue;
 
 		for (int32 Column = 0; Column < 3; ++Column)
 		{

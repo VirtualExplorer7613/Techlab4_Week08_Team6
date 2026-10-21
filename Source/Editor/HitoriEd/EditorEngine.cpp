@@ -423,6 +423,7 @@ void UEditorEngine::Tick(const float DeltaTime)
 // DeltaTime을 패널에 전달하고 에디터 단축키를 처리한다.
 void UEditorEngine::BeginFrame(const float DeltaTime)
 {
+	ShadowStats::BeginFrame();
 	FStatOverlay::Tick(DeltaTime);
 	EditorControlsPanel->FEditorControlsPanel::DeltaTime = DeltaTime;
 
@@ -636,6 +637,7 @@ void UEditorEngine::EndFrame()
 	// UI 변경 후 설정을 복사해 종료 시 카메라 수명에 의존하지 않는다.
 	SettingsPanel->CaptureViewportSettings();
 	// 프로파일러 반영
+	Renderer->CompleteShadowStatsFrame();
 	FStatRegistry::EndFrame();
 }
 
@@ -1081,6 +1083,9 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
 
     if (bRenderShadows)
     {
+        // 전체 구간은 설정, 하위 세 경로, Light Buffer 후처리와 미리보기까지 포함한다.
+        // 하위 타이머를 다시 더하지 않고 이 구간을 한 번만 잰다.
+        SCOPE_CYCLE_COUNTER(ShadowStats::STAT_ShadowTotal);
         Renderer->SetShadowQuality(Settings.ShadowQuality);
 		Renderer->SetShadowResolutionQuality(static_cast<EShadowResolutionQuality>(Settings.ShadowResolutionQuality));
 		Renderer->SetPCSSMaxKernel(Settings.PCSSMaxKernel);
@@ -1119,6 +1124,8 @@ void UEditorEngine::RenderFrame(const int32 ViewIndex, UWorld& ViewWorld, const 
             Renderer->CaptureCascadePreview();
         }
     }
+
+    Renderer->RecordShadowViewStats(bRenderShadows && bHasVisibleShadowReceiver);
 
 	if (bPrepass)
 	{

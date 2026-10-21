@@ -243,6 +243,8 @@ public:
     void RenderPointShadowMap(const FScene& Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const EViewMode ViewMode);
 
     void RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const float TanHalfFovY, const float ViewportHeight, const EViewMode ViewMode, bool bOrthographic = false);
+    void RecordShadowViewStats(bool bShadowView);
+    void CompleteShadowStatsFrame() const;
     void CalculateShadowMapLOD(const FVector4 InPositionRadius, const FVector & CameraLocation, const float InViewportHeight, const float CotanHalfFOV, uint32& OutRequestSize);
 
 	// 오브젝트 칸에 World와 노멀 변환용 역전치를 함께 쓴다. 모든 칸 쓰기는 이 함수를 거친다.

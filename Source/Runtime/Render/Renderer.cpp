@@ -6,6 +6,7 @@
 #include "Asset/AssetManager.h"
 #include "Core/EngineTimer.h"
 #include "Core/Stats/LightweightStats.h"
+#include "Core/Stats/ShadowStats.h"
 
 #include "Engine/PrimitiveSceneProxy.h"
 #include "Engine/Scene.h"
@@ -231,6 +232,8 @@ void FRenderer::RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &C
     if (CascadeConstants.CSMEnabled == 0)
         return;
 
+    bool bUpdatedMap = false;
+
     // 미리보기 Pixel Shader는 t0에서 배열을 읽는다.
     RenderCommand::UnbindShaderResource(0, EShaderBindFlagBits::Pixel | EShaderBindFlagBits::Vertex);
 
@@ -252,6 +255,8 @@ void FRenderer::RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &C
         if (CascadeShadowCasters[Index].IsEmpty() && Desc.DepthView && Desc.Width > 0 && Desc.Height > 0)
         {
             RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+            ++ShadowStats::Pending.DepthClears;
+            bUpdatedMap = true;
             continue;
         }
 
@@ -263,7 +268,12 @@ void FRenderer::RenderCascadeShadowPreview(const FScene &Scene, const FMatrix &C
 
             break;
         }
+        ++ShadowStats::Pending.CascadePasses;
+        bUpdatedMap = true;
     }
+
+    if (bUpdatedMap)
+        ++ShadowStats::Pending.UpdatedLights[0];
 
     // Shadow Draw가 변경한 ViewCB를 복원한다.
     FViewConstants CameraConstants{};
@@ -1614,6 +1624,8 @@ void FRenderer::DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, E
 
         const FCachedMeshLOD &LOD = Proxy->GetLOD(0);
 
+        bool bSubmittedCaster = false;
+
         for (uint32 i = 0; i < LOD.NumSections; ++i)
         {
             const FCachedMeshSection &Section = Proxy->GetSection(LOD.FirstSection + i);
@@ -1623,7 +1635,13 @@ void FRenderer::DrawShadowCasters(const FScene& Scene, const FMatrix& LightVP, E
             // Depth Only 모드이므로 Pixel Shader는 비활성화된다.
             BindMaterial(Section.Material, EViewMode::Unlit);
             RenderCommand::DrawIndexed(Section.IndexCount, Section.StartIndex);
+            ++ShadowStats::Pending.DrawCalls;
+            ShadowStats::Pending.Triangles += Section.IndexCount / 3;
+            bSubmittedCaster = true;
         }
+
+        if (bSubmittedCaster)
+            ++ShadowStats::Pending.CasterSubmissions;
     }
 
     bDepthOnly = false;
@@ -1670,6 +1688,8 @@ bool FRenderer::RenderShadowDepth(const FScene& Scene, const FShadowPassDesc& De
 {
     if (!ShadowRenderer || !ShadowRenderer->BeginShadowPass(Desc))
         return false;
+
+    ++ShadowStats::Pending.Passes;
 
     DrawShadowCasters(Scene, LightVP, ViewMode, ShadowCasters);
 
@@ -1762,11 +1782,17 @@ void FRenderer::RenderDirectionalShadowMap(const FScene& Scene, const FMatrix& C
     if (!bOrthographic && ShadowCasters.IsEmpty())
     {
         RenderCommand::GetContext()->ClearDepthStencilView(Desc.DepthView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+        ++ShadowStats::Pending.DepthClears;
     }
     else if (!RenderShadowDepth(Scene, Desc, LightVP, ViewMode, bOrthographic ? nullptr : &ShadowCasters))
     {
         return;
     }
+    else
+    {
+        ++ShadowStats::Pending.DirectionalPasses;
+    }
+    ++ShadowStats::Pending.UpdatedLights[0];
 
     // Shadow Map 생성과 샘플링에 동일한 Light VP를 사용한다.
     UploadLightGlobalConstants(LightVP);
@@ -1846,6 +1872,91 @@ void FRenderer::RenderPointShadowMap(const FScene &Scene, const FMatrix &CameraV
     //CameraViewConstants.VP = CameraViewProjection;
     //CameraViewConstants.CameraPosition = CameraLocation;
     //RenderCommand::UpdateBufferData(ViewCB.get(), &CameraViewConstants, sizeof(FViewConstants));
+}
+
+void FRenderer::RecordShadowViewStats(bool bShadowView)
+{
+    auto& Stats = ShadowStats::Pending;
+    ++Stats.Views;
+    Stats.ShadowViews += bShadowView ? 1u : 0u;
+
+    // 이미 수집된 Light Buffer만 읽는다. Scene 순회나 Caster 재수집은 하지 않는다.
+    Stats.EligibleLights[0] += LightData.DirectionalLight.ShadowParameters.W > 0.0f &&
+        LightData.DirectionalLight.ColorIntensity.W > 0.0f ? 1u : 0u;
+    for (uint32 Index = 0; Index < LightData.PointLightCount; ++Index)
+    {
+        Stats.EligibleLights[1] += LightData.PointLights[Index].ShadowParameters.W > 0.0f &&
+            LightData.PointLights[Index].ColorIntensity.W > 0.0f ? 1u : 0u;
+    }
+    for (uint32 Index = 0; Index < LightData.SpotLightCount; ++Index)
+    {
+        Stats.EligibleLights[2] += LightData.SpotLights[Index].ShadowParameters.W > 0.0f &&
+            LightData.SpotLights[Index].ColorIntensity.W > 0.0f ? 1u : 0u;
+    }
+
+    if (bShadowView && IsCSMActive())
+    {
+        Stats.ActiveCascades = std::max(Stats.ActiveCascades, CascadeConstants.CascadeCount);
+        ++Stats.CSMViews;
+    }
+}
+
+void FRenderer::CompleteShadowStatsFrame() const
+{
+    auto& Stats = ShadowStats::Pending;
+    Stats.ConfiguredCascades = CSMSettings.CascadeCount;
+    Stats.bCSMEnabled = bCSMEnabled;
+    Stats.CascadeResolution = CascadeShadowMaps.GetResolution();
+    Stats.ShadowDistance = CSMShadowDistance;
+
+    // 텍스처 소유자마다 한 번만 합산한다. SRV/DSV/배열 Slice View는 더하지 않는다.
+    // 현재 Shadow 리소스는 비압축 포맷이며 실제 Desc의 mip/array/sample 크기를 반영한다.
+    const auto EstimateTextureBytes = [](ID3D11Resource* Resource) -> uint64
+    {
+        if (!Resource)
+            return 0;
+        ComPtr<ID3D11Texture2D> Texture;
+        if (FAILED(Resource->QueryInterface(IID_PPV_ARGS(Texture.GetAddressOf()))))
+            return 0;
+        D3D11_TEXTURE2D_DESC Desc{};
+        Texture->GetDesc(&Desc);
+        uint64 Texels = 0;
+        uint32 Width = Desc.Width;
+        uint32 Height = Desc.Height;
+        for (uint32 Mip = 0; Mip < Desc.MipLevels; ++Mip)
+        {
+            Texels += static_cast<uint64>(Width) * Height;
+            Width = std::max(Width / 2, 1u);
+            Height = std::max(Height / 2, 1u);
+        }
+        return Texels * Desc.ArraySize * Desc.SampleDesc.Count * FormatToBytes(Desc.Format);
+    };
+
+    if (ShadowRenderer)
+    {
+        const FTexture2D* Directional = ShadowRenderer->GetDirectionalShadowMap();
+        const FTexture2D* Atlas = ShadowRenderer->GetShadowMapAtlas();
+        const FTexture2D* Spot = ShadowRenderer->GetSpotShadowMap();
+        const FTextureCube* Point = ShadowRenderer->GetPointLightShadowMap();
+        Stats.DirectionalResolution = Directional ? Directional->GetWidth() : 0;
+        Stats.AtlasResolution = Atlas ? Atlas->GetWidth() : 0;
+        const auto& Allocator = ShadowRenderer->GetShadowAtlasAllocator();
+        Stats.AtlasTiles = Allocator.GetAllocatedTileCount();
+        Stats.AtlasAllocatedTexels = Allocator.GetAllocatedTexels();
+        Stats.EstimatedBytes += EstimateTextureBytes(Directional ? Directional->GetRawPtr() : nullptr);
+        Stats.EstimatedBytes += EstimateTextureBytes(Atlas ? Atlas->GetRawPtr() : nullptr);
+        // Atlas 도입 후 사용하지 않더라도 아직 할당되어 있는 전용 맵도 포함한다.
+        Stats.EstimatedBytes += EstimateTextureBytes(Spot ? Spot->GetRawPtr() : nullptr);
+        Stats.EstimatedBytes += EstimateTextureBytes(Point ? Point->GetRawPtr() : nullptr);
+        Stats.bResourcesAvailable = true;
+    }
+    Stats.EstimatedBytes += EstimateTextureBytes(CascadeShadowMaps.GetTexture());
+    for (const auto& Preview : CascadePreviewTextures)
+    {
+        Stats.PreviewBytes += EstimateTextureBytes(Preview ? Preview->GetRawPtr() : nullptr);
+    }
+    Stats.EstimatedBytes += Stats.PreviewBytes;
+    ShadowStats::EndFrame();
 }
 
 void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const float TanHalfFovY, const float ViewportHeight, const EViewMode ViewMode, bool bOrthographic)
@@ -2023,6 +2134,7 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
         FShadowAtlasTile ShadowAtlasTile;
         bool bHasChangedRequestSize = false;
         uint32 AllocatedFaceSize = 0;
+        bool bUpdatedPointMap = false;
 
         for(uint32 face = 0; face < 6; face++)
         {
@@ -2117,6 +2229,9 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
                 LightData.PointLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
                 DrawShadowCasters(Scene, FaceVP, ViewMode, &ShadowCasters);
+                ++ShadowStats::Pending.Passes;
+                ++ShadowStats::Pending.PointFaces;
+                bUpdatedPointMap = true;
 
                 Cache.CachedScaleOffsets[face] = LightData.PointLights[i].AtlasScaleOffset[face];
                 Cache.CachedTiles[face] = ShadowAtlasTile;
@@ -2128,6 +2243,9 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
                 Cache.CachedTiles[face].NodeIndex = -1;
             }
         }
+
+        if (bUpdatedPointMap)
+            ++ShadowStats::Pending.UpdatedLights[1];
 
         Cache.bIsValid = true;
         Cache.bIsDirty = false;
@@ -2274,6 +2392,9 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
                 LightData.SpotLights[i].ShadowParameters.Z = 1.0f / AtlasSize;
 
                 DrawShadowCasters(Scene, LightVP, ViewMode, &ShadowCasters);
+                ++ShadowStats::Pending.Passes;
+                ++ShadowStats::Pending.SpotTiles;
+                ++ShadowStats::Pending.UpdatedLights[2];
 
                 Cache.bIsValid = true;
                 Cache.bIsDirty = false;
