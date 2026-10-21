@@ -331,6 +331,11 @@ public:
         return bCSMEnabled;
     }
 
+    bool IsCSMActive() const
+    {
+        return CascadeConstants.CSMEnabled != 0 && CascadeConstants.CascadeCount > 0;
+    }
+
     bool GetCascadeBlendEnabled() const
     {
         return bCascadeBlendEnabled;
@@ -364,7 +369,6 @@ public:
         return CSMSettings;
     }
 
-    void PrepareCascadeShadows(const FScene &Scene, const FMatrix &CameraViewProjection, const FVector &CameraLocation, const FVector &CameraForward, float CameraNear, float CameraFar,bool bOrthographic, EViewMode ViewMode);
     void PrepareCascadeShadows(const FScene& Scene, const FMatrix& CameraViewProjection, const FVector& CameraLocation, const FVector& CameraForward, float CameraNear, float CameraFar, bool bOrthographic, EViewMode ViewMode, const FMatrix& CameraWorld, float TanHalfFovX, float TanHalfFovY);
 
     const FSpotLight GetSpotLightData(uint32 SpotIndex) const { return LightData.SpotLights[SpotIndex]; }

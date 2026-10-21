@@ -509,6 +509,10 @@ float CalculateSpotShadow(float3 worldPos, float3 normal, uint index, FSpotLight
     if (bShowShadows == 0)
         return 1.0f;
     
+    // Atlas 타일이 없으면 그림자가 없는 것으로 처리한다.
+    if (SpotLights[index].AtlasScaleOffset.x <= 0.0f)
+        return 1.0f;
+    
     float4 shadowPos = mul(float4(worldPos, 1.0f), SpotLights[index].ViewProjection);
     if (shadowPos.w <= 0)
     {
