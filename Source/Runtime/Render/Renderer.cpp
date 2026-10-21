@@ -2096,6 +2096,9 @@ void FRenderer::RenderShadowMap(const FScene& Scene, const FMatrix& CameraViewPr
 
             if(bTileReady)
             {
+                // Down Scaling for Point
+                RequestSize = RequestSize >> 1;
+
                 uint32 InnerX = ShadowAtlasTile.X;
                 uint32 InnerY = ShadowAtlasTile.Y;
                 uint32 InnerSize = ShadowAtlasTile.Size;
